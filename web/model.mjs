@@ -33,7 +33,7 @@ export function selectRepositories(data, { mode = 'current', ids, includeStale =
   if (mode === 'archive') statuses.add('cold');
   if (includeStale) { statuses.add('stale'); statuses.add('inaccessible'); }
   const selected = ids === undefined ? null : new Set(ids);
-  return data.repositories.filter(repository => (scope === 'all' || repositoryVisibility(repository) === scope) && repository.rulesVersion === data.rules.version && statuses.has(repository.status) && repository.history.length > 0 && (!selected || selected.has(repository.id)));
+  return data.repositories.filter(repository => (scope === 'all' || repositoryVisibility(repository) === scope) && (repository.rulesVersion === data.rules.version || (repositoryVisibility(repository) === 'private' && repository.dataFreshness === 'retained-private')) && statuses.has(repository.status) && repository.history.length > 0 && (!selected || selected.has(repository.id)));
 }
 
 export function latestTotals(repositories, language = 'all') {

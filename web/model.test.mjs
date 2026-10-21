@@ -205,3 +205,14 @@ test('archived repositories cannot re-enter through legacy picker, search, archi
   assert.deepEqual(model.repositoryOptions(repositories, {query: 'archived'}), []);
   assert.deepEqual(selectRepositories(dataset(repositories), {mode: 'archive', includeStale: true, ids: ['archived-repo']}), []);
 });
+
+test('explicit retained private baseline counts by default without hiding behind stale control', () => {
+  const retained = privateRepo(30, {rulesVersion: 'old', dataFreshness: 'retained-private'});
+  const archived = privateRepo(900, {id: 'archived', status: 'archived', rulesVersion: 'old', dataFreshness: 'retained-private'});
+  const unverified = privateRepo(700, {id: 'unverified', rulesVersion: 'old'});
+  const data = dataset([repo('a', [snapshot(day(1), 10)]), retained, archived, unverified]);
+  assert.deepEqual(selectRepositories(data).map(r => r.id), ['a', retained.id]);
+  assert.equal(latestTotals(selectRepositories(data)).code, 40);
+  assert.deepEqual(selectRepositories(data, {scope: 'private'}).map(r => r.id), [retained.id]);
+  assert.equal(selectRepositories(data, {includeStale: true, mode: 'archive'}).some(r => r.id === 'archived'), false);
+});

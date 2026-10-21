@@ -2,7 +2,7 @@ import {cp, mkdir, rm, writeFile, readFile, readdir} from 'node:fs/promises';
 import {createHash} from 'node:crypto';
 import {resolve, relative, dirname, extname} from 'node:path';
 import {pathToFileURL} from 'node:url';
-import {mergePrivateMetrics, validatePrivateMetrics} from './metrics.mjs';
+import {mergePrivateMetrics, validatePrivateMetrics, validateRetainedPrivateBaseline, validatePrivateMetricsReplacement} from './metrics.mjs';
 
 // A release-wide content digest keeps the HTML, CSS and complete ESM graph together.
 // Hash filenames (rather than reload instructions) invalidate browser/CDN asset caches.
@@ -55,6 +55,15 @@ export async function buildSite({root = resolve(import.meta.dirname, '..'), priv
   } catch (error) {
     if (error.code !== 'ENOENT') throw error;
   }
+  let retainedBaseline;
+  try {
+    retainedBaseline = JSON.parse(await readFile(resolve(root, 'web/data/retained-private-baseline.json'), 'utf8'));
+    validateRetainedPrivateBaseline(retainedBaseline);
+    // A later reset does not silently inherit this one-time exception.
+    if (retainedBaseline.targetEpoch !== data.datasetEpoch) retainedBaseline = undefined;
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+  }
   if (privateBytes !== undefined) {
     let privateData;
     try {
@@ -64,15 +73,17 @@ export async function buildSite({root = resolve(import.meta.dirname, '..'), priv
       throw new Error('Invalid sanitized private metrics; refusing site build.');
     }
     if (privateData.collection.failed > 0) throw new Error('Incomplete private collection; retain a previous complete sanitized snapshot.');
+    if (retainedBaseline) validatePrivateMetricsReplacement(retainedBaseline.metrics, privateData, data, {resetEpoch: data.datasetEpoch, preserveScope: true});
     data = mergePrivateMetrics(data, privateData);
     if (privateStatus === 'stale') data.publication.privateStatus = 'stale';
   }
-  if (data.datasetEpoch && privateBytes === undefined) {
+  if (privateBytes === undefined && retainedBaseline) data = mergePrivateMetrics(data, retainedBaseline.metrics, {retainedBaseline});
+  if (data.datasetEpoch && privateBytes === undefined && !retainedBaseline) {
     data.publication = {privateRepositories: 0, privateUpdatedAt: null, privateSource: null, privateStatus: 'pending-rebuild'};
   }
   await rm(resolve(root, 'site'), {recursive: true, force: true});
   await mkdir(resolve(root, 'site'), {recursive: true});
-  await cp(resolve(root, 'web'), resolve(root, 'site'), {recursive: true, filter: path => !path.endsWith('.test.mjs') && path !== resolve(root, 'web/data/private-metrics.json')});
+  await cp(resolve(root, 'web'), resolve(root, 'site'), {recursive: true, filter: path => !path.endsWith('.test.mjs') && !['private-metrics.json', 'retained-private-baseline.json'].some(name => path === resolve(root, 'web/data', name))});
   await writeFile(resolve(root, 'site/data/stats.json'), JSON.stringify(data));
   await versionAssets(resolve(root, 'site'));
   await writeFile(resolve(root, 'site/.nojekyll'), '');

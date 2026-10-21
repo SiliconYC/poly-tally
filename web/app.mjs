@@ -50,7 +50,7 @@ async function initialize() {
     $('load-state').hidden = true;
     $('dashboard').hidden = false;
     $('updated-at').textContent = `更新于 ${formatDate(data.generatedAt)} UTC`;
-    $('rules-description').textContent = `规则 ${data.rules.version} · ${data.rules.description ?? '所有纳入仓库采用相同统计规则。'}`;
+    $('rules-description').textContent = `规则 ${data.rules.version} · ${data.rules.description ?? '所有纳入仓库采用相同统计规则。'}${data.publication?.privateStatus === 'retained' ? ` · 私有旧快照规则 ${data.publication.privateRulesVersion}` : ''}`;
     $('footer-version').textContent = `采集器 ${data.collector?.version ?? '—'} · 规则 ${data.rules.version}`;
     render();
     renderPublication();
@@ -66,7 +66,7 @@ function renderPublication() {
   const summary = publicationSummary(data);
   $('publication-counts').textContent = `已发布 ${format(summary.publicRepositories)} 个公开仓库 + ${format(summary.privateRepositories)} 个私有仓库`;
   const source = { local: '本地采集', 'github-actions': 'GitHub Actions' }[summary.privateSource];
-  const status = { available: '可用', 'not-configured': '未配置私有采集凭据', stale: '保留旧指标，尚未刷新', 'pending-rebuild': '等待重新采集，旧指标未计入' }[summary.privateStatus] ?? '采集状态未知';
+  const status = { available: '可用', retained: '私有快照待重算（已计入旧快照）', 'not-configured': '未配置私有采集凭据', stale: '保留旧指标，尚未刷新', 'pending-rebuild': '等待重新采集，旧指标未计入' }[summary.privateStatus] ?? '采集状态未知';
   $('private-updated-at').textContent = `私有指标：${status} · 最后成功 ${summary.privateUpdatedAt ? `${formatDate(summary.privateUpdatedAt)} UTC` : '尚无独立采集时间'}${source ? ` · ${source}` : ''}${summary.privateRepositories ? '' : ' · 尚无已发布私有指标'}`;
 }
 function renderRepositoryOptions() {
@@ -123,9 +123,10 @@ function render() {
   $('active-filters').hidden = !filtered.length;
   $('active-filters').textContent = filtered.join(' · ');
   const messages = [];
+  if (data.publication?.privateStatus === 'retained') messages.push(`私有快照待重算 · ${formatDate(data.publication.privateUpdatedAt)} UTC；未归档私有仓库已计入旧快照。`);
   if (data.publication?.privateStatus === 'pending-rebuild') messages.push('当前仅含公开仓库；私有仓库等待重新采集，旧数据未计入。');
   if (!data.repositories.length) messages.push('尚无可发布的仓库数据。首次成功采集后，这里会自动呈现默认分支历史。');
-  const mismatched = scoped.filter(repository => state.ids.includes(repository.id) && repository.rulesVersion !== data.rules.version && repository.history.length);
+  const mismatched = scoped.filter(repository => state.ids.includes(repository.id) && repository.rulesVersion !== data.rules.version && repository.dataFreshness !== 'retained-private' && repository.history.length);
   if (mismatched.length) messages.push(`${mismatched.length} 个仓库保留旧规则快照，已隔离出汇总。`);
   const stale = selected.filter(repository => ['stale', 'inaccessible'].includes(repository.status));
   if (stale.length) messages.push(`已明确纳入 ${stale.length} 个过期或不可访问仓库的最后成功快照；它们可能与源仓库当前状态不同。`);
@@ -193,7 +194,7 @@ function renderTable() {
   for (const repository of repositories) {
     const isPrivate = repositoryVisibility(repository) === 'private';
     const row = element('tr');
-    const name = element('td'); name.append(repositoryLink(repository), element('span', 'repo-secondary', isPrivate ? '私有 · 按日规模' : `公开 · ⑂ ${repository.branch || '尚无默认分支'}`));
+    const name = element('td'); name.append(repositoryLink(repository), element('span', 'repo-secondary', isPrivate ? (repository.dataFreshness === 'retained-private' ? '私有 · 旧快照待重算' : '私有 · 按日规模') : `公开 · ⑂ ${repository.branch || '尚无默认分支'}`));
     const totals = latestTotals([repository], state.language);
     row.append(name);
     for (const metric of ['total', 'code', 'comment', 'documentation', 'blank', 'files']) {

@@ -34,8 +34,10 @@ class 私有规模导出_类:
 
     def api_构建(self, arg_时间: datetime | None = None) -> dict:
         现在 = (arg_时间 or datetime.now(timezone.utc)).astimezone(timezone.utc)
-        私有表 = [项 for 项 in self.数据库.api_仓库列表() if 项["private"]]
-        归档键 = sorted(self.api_匿名键(项["id"]) for 项 in 私有表 if 项["status"] == "archived")
+        全部仓库 = self.数据库.api_仓库列表()
+        私有表 = [项 for 项 in 全部仓库 if 项["private"]]
+        # 归档与可见性无关；私有转公开再归档也必须提供排除证据。
+        归档键 = sorted(self.api_匿名键(项["id"]) for 项 in 全部仓库 if 项["status"] == "archived")
         仓库表 = [项 for 项 in 私有表 if 项["status"] != "archived"]
         成功时间 = [datetime.fromisoformat(项["lastSuccessAt"]).astimezone(timezone.utc) for 项 in 仓库表 if 项["lastSuccessAt"] is not None]
         if arg_时间 is None and 成功时间:

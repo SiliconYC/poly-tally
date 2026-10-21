@@ -64,3 +64,8 @@ test('metric cards keep distinct surfaces without decorative animation', () => {
   assert.match(css, /\.metric-card\{[^}]*border:1px solid var\(--line\)/);
   assert.doesNotMatch(css, /\.stack-layer\{[^}]*transition:|\.monthly-bar\{[^}]*transition:|\.pie-sector\{[^}]*transition:/);
 });
+
+test('retained private warning exposes old snapshot date in the main dashboard and per-row context', () => {
+  assert.match(app, /privateStatus === 'retained'[\s\S]*?私有快照待重算[\s\S]*?privateUpdatedAt/);
+  assert.match(app, /dataFreshness === 'retained-private'[^\n]*旧快照待重算/);
+});

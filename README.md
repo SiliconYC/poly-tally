@@ -108,7 +108,7 @@ Actions 将公开与私有计算分开。公开作业使用本仓库 `contents: 
 
 当前批次为 `active-default-branches-2026-10-21-v2`（工作流 `POLY_TALLY_DATASET_EPOCH`）。首次运行忽略旧检查点、SQLite 和解析缓存，重新读取当前默认分支，重建其完整第一父链历史；**不是清空图表历史**。已归档仓库完全排除。公开采集任何失败都会阻止首次重算发布；成功后 `tally-state/checkpoint.json` 记录新批次，后续公开运行恢复增量。
 
-私有凭证缺失或重算失败时，旧私有快照不会加入新批次；公开结果可以发布，`publication.privateStatus` 为 `pending-rebuild`、`privateUpdatedAt` 为 `null`。只有完整的同批次私有采集才能恢复展示。原批次本地状态及数据分支 Git 历史不被删除，但不参与新数字。
+私有凭证缺失不等于排除私有仓库。当前保留一份明确审计的 `web/data/retained-private-baseline.json`：仅恢复经 GitHub 元数据核验未归档的 16 个私有仓库，排除 5 个已归档仓库。它保留 **2026-10-21 05:18:28 UTC** 的旧采集时间、旧规则版本及原始批次（`null` 表示未启用 epoch 的旧批次），不是本次重算结果。默认汇总包含这些旧快照，页面显示“私有快照待重算”；`publication.privateStatus=retained`，每条私有记录标记 `dataFreshness=retained-private`。完整、同批次且范围经核验的私有新采集优先替换它；没有已审计保留基线时才标记 `pending-rebuild`。原有状态和 Git 历史不删除。详见 [保留基线审计](docs/retained-private-baseline.md)。
 
 本地复现全新公开重算（只读源仓库，不发布）：
 
@@ -184,7 +184,7 @@ python -m poly_tally collect --public-only --import-checkpoint /备份目录/che
 
 `.github/workflows/pages.yml` 依次运行 Python / Node 测试、恢复状态、采集、保存公开检查点、上传并部署静态页面。前端没有运行时 CDN 依赖，所有链接和数据请求都支持 `/poly-tally/` 项目路径。
 
-`web/data/stats.json` 是公开基线，`web/data/private-metrics.json` 是脱敏私有基线。只有 `datasetEpoch` 相同才能构建合并，后续优先从持久数据分支及本轮作业取得最新规模，无需反复向 `dev` 提交统计。`--refresh` 刷新产物时间，私有更新时间单独显示。`dev` 保存代码，`tally-state` 保存可公开采集状态。
+`web/data/stats.json` 是公开基线，`web/data/private-metrics.json` 是脱敏私有基线。正常合并要求 `datasetEpoch` 相同；唯一例外是显式 `retained-private-baseline` 过渡模式，它不改写旧批次、规则或时间，并独立标记来源。后续优先从持久数据分支及本轮作业取得完整新规模，无需反复向 `dev` 提交统计。`--refresh` 刷新产物时间，私有更新时间单独显示。`dev` 保存代码，`tally-state` 保存可公开采集状态。
 
 ## 验收复现
 

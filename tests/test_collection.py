@@ -232,6 +232,37 @@ class Test采集_类(unittest.TestCase):
         self.assertEqual(数据["repositories"], [])
         self.assertEqual(数据["summary"]["code"], 0)
 
+    def test_私有已归档仓库不读取源码且只导出哈希排除证据(self) -> None:
+        from poly_tally.private_metrics import 私有规模导出_类
+        self.状态["private"] = True
+        self.库.api_保存仓库(self.状态)
+        元数据 = {"id": 1, "full_name": "fixture/one", "default_branch": "main", "private": True, "archived": True, "fork": False, "size": 1}
+        采集器 = 采集器_类(self.配置, self.根 / "state", None, False, arg_仅私有=True)
+        self.addCleanup(采集器.api_关闭)
+        with patch.object(采集器.发现器, "api_发现", return_value=[元数据]), patch.object(采集器.发现器, "api_读取默认分支") as 分支:
+            运行 = 采集器.api_采集()
+        分支.assert_not_called()
+        self.assertEqual(运行["repositories"], 0)
+        数据 = 私有规模导出_类(self.库, self.规则).api_构建()
+        self.assertEqual(数据["repositories"], [])
+        self.assertEqual(数据["archivedRepositoryKeys"], [私有规模导出_类.api_匿名键("1")])
+        self.assertNotIn("fixture/one", json.dumps(数据))
+
+    def test_私有转公开后归档仍按归档排除而非可见性过滤(self) -> None:
+        from poly_tally.private_metrics import 私有规模导出_类
+        self.状态["private"] = True
+        self.库.api_保存仓库(self.状态)
+        元数据 = {"id": 1, "full_name": "fixture/one", "default_branch": "main", "private": False, "archived": True, "fork": False, "size": 1}
+        采集器 = 采集器_类(self.配置, self.根 / "state", None, False, arg_仅私有=True)
+        self.addCleanup(采集器.api_关闭)
+        with patch.object(采集器.发现器, "api_发现", return_value=[元数据]), patch.object(采集器.发现器, "api_读取默认分支") as 分支:
+            采集器.api_采集()
+        分支.assert_not_called()
+        self.assertEqual(self.库.api_读取仓库("1")["status"], "archived")
+        数据 = 私有规模导出_类(self.库, self.规则).api_构建()
+        self.assertEqual(数据["repositories"], [])
+        self.assertEqual(数据["archivedRepositoryKeys"], [私有规模导出_类.api_匿名键("1")])
+
     def test_旧归档记录不进入任何公开统计(self) -> None:
         self.状态["status"] = "archived"
         self.库.api_保存仓库(self.状态)

@@ -71,14 +71,14 @@ class 采集器_类:
         for 元数据 in 元数据表:
             ID = str(元数据["id"])
             已见.add(ID)
-            if self.仅私有 and not 元数据["private"]:
-                continue
             旧状态 = 已知[ID] if ID in 已知 else None
             if 旧状态:
                 旧状态.update({"private": 元数据["private"], "name": 元数据["full_name"], "url": f"https://github.com/{元数据['full_name']}"})
                 self.引擎.数据库.api_保存仓库(旧状态)
             if 元数据.get("archived") is True:
                 self._排除归档(元数据)
+                continue
+            if self.仅私有 and not 元数据["private"]:
                 continue
             # 显式确认的冷数据不会因同名或列表重新出现而自动激活。
             if 旧状态 and 旧状态["status"] == "cold":
