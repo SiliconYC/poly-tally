@@ -1,0 +1,18 @@
+{
+  "owners": ["SiliconYC"],
+  "repositories": {"include": ["SiliconYC/*"], "exclude": []},
+  "rules": {
+    "include_forks": false,
+    "max_blob_bytes": 2000000,
+    "include": ["**"],
+    "exclude": [
+      "**/node_modules/**", "**/vendor/**", "**/.git/**", "**/.venv/**", "**/venv/**",
+      "**/__pycache__/**", "**/dist/**", "**/build/**", "**/coverage/**", "**/.next/**",
+      "**/target/**", "**/.cache/**", "**/.pytest_cache/**", "**/.mypy_cache/**",
+      "**/*.min.js", "**/*.min.css", "**/*.map", "**/package-lock.json", "**/pnpm-lock.yaml",
+      "**/yarn.lock", "**/uv.lock", "**/poetry.lock", "**/Cargo.lock", "**/composer.lock",
+      "**/web/data/**", "**/site/data/**", "**/.cm/stat/**", "**/tally-state/**"
+    ],
+    "languages": {}
+  }
+}

@@ -1,0 +1,10 @@
+import {cp, mkdir, rm, writeFile, readFile} from 'node:fs/promises';
+import {resolve} from 'node:path';
+const root = resolve(import.meta.dirname, '..');
+const data = JSON.parse(await readFile(resolve(root, 'web/data/stats.json'), 'utf8'));
+if (data.schemaVersion !== 1 || !Array.isArray(data.repositories)) throw new Error('Invalid public dataset');
+await rm(resolve(root, 'site'), {recursive: true, force: true});
+await mkdir(resolve(root, 'site'), {recursive: true});
+await cp(resolve(root, 'web'), resolve(root, 'site'), {recursive: true, filter: path => !path.endsWith('.test.mjs')});
+await writeFile(resolve(root, 'site/.nojekyll'), '');
+console.log(`Built static site: ${data.repositories.length} public repository records`);

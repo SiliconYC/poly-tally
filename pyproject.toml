@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "poly-tally"
+version = "0.1.0"
+description = "Read-only, rebuildable code inventory across Git repositories"
+requires-python = ">=3.12"
+dependencies = ["Pygments==2.21.0", "requests==2.34.2"]
+
+[project.optional-dependencies]
+test = ["pytest==9.1.1"]
+
+[tool.setuptools.packages.find]
+include = ["poly_tally*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

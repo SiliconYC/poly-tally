@@ -28,3 +28,12 @@ node_modules
 .claude
 .superpowers
 docs/superpowers
+
+# 独立统计状态与 Python 环境
+.venv/
+*.egg-info/
+.poly-tally/
+state/
+site/
+playwright-report/
+test-results/
