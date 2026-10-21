@@ -496,3 +496,93 @@ def test_complete_import_still_rejects_unverified_or_capturing_repository(fixtur
     with pytest.raises(ValueError, match='capture'):
         adapter_module().import_bundle(root, fixture.config, state, 'fresh')
     assert not state.exists()
+
+
+def test_validation_visits_unchanged_subtree_once_per_path_context(fixture, monkeypatch):
+    stable = {f'stable/f{i}.py': 'x=1\n' for i in range(200)}
+    fixture.commit({**stable, 'changing.py': 'x=0\n'})
+    for i in range(1, 12):
+        fixture.commit({'changing.py': f'x={i}\n'})
+    root = fixture.write_bundle()
+    bundle = adapter_module().ConnectorBundle(root, fixture.rules)
+    checked = []
+    original = fixture.rules.api_语言
+    def counted(path):
+        checked.append(path)
+        return original(path)
+    monkeypatch.setattr(fixture.rules, 'api_语言', counted)
+    bundle.validate()
+    assert len(checked) == 212  # 200 stable files + 12 changed root files.
+    assert bundle.audit()['verifiedTrees'] == 13
+    assert bundle.audit()['verifiedBlobs'] == 12
+
+
+def test_merkle_diff_matches_git_without_flattening_unchanged_subtrees(fixture, monkeypatch):
+    first = fixture.commit({**{f'stable/f{i}.py': 'x=1\n' for i in range(200)},
+                            'replaced.py': 'old=1\n', 'directory/old.py': 'old=1\n',
+                            'mode.py': 'x=1\n', 'rename.py': '# title\nx=1\n'})
+    fixture.git('rm', 'replaced.py', 'directory/old.py')
+    fixture.git('mv', 'rename.py', 'rename.md')
+    (fixture.repo / 'mode.py').chmod(0o755)
+    second = fixture.commit({'replaced.py/nested.py': 'new=1\n', 'directory': 'new=1\n',
+                             '源码.py': 'x=2\n', 'tab\tname.py': 'x=3\n'})
+    bundle = adapter_module().ConnectorBundle(fixture.write_bundle(), fixture.rules)
+    backend = bundle.backend('1')
+    before = backend.api_文件树(first)
+    after = backend.api_文件树(second)
+    expected = [(path, *after.get(path, ('000000', '0' * 40)))
+                for path in sorted(before.keys() | after.keys()) if before.get(path) != after.get(path)]
+    calls = []
+    original = bundle.flat_tree
+    def counted(sha):
+        calls.append(sha)
+        return original(sha)
+    monkeypatch.setattr(bundle, 'flat_tree', counted)
+    assert backend.api_变动(first, second) == expected
+    assert calls == []  # SHA equality, not full flattened-path comparisons.
+    assert comparable(sync_bundle(fixture, fixture.root / 'bundle')) == comparable(native(fixture))
+
+
+def test_tree_context_validation_cannot_reuse_excluded_path_for_included_path(fixture):
+    # The same content-addressed tree moves out of an excluded directory.
+    fixture.commit({'vendor/shared.py': 'secret=1\n', 'anchor.py': 'x=1\n'})
+    fixture.git('mv', 'vendor', 'source')
+    fixture.commit({})
+    root = fixture.write_bundle()
+    for path in (root / 'objects/blobs').glob('*.json'):
+        if base64.b64decode(json.loads(path.read_text())['content']) == b'secret=1\n':
+            path.unlink()
+    with pytest.raises(ValueError, match='missing|malformed'):
+        adapter_module().ConnectorBundle(root, fixture.rules).validate()
+
+
+def test_failed_tree_context_validation_can_retry_without_skipping_children(fixture):
+    fixture.commit({'src/a.py': 'x=1\n', 'src/nested/b.py': 'y=1\n'})
+    root = fixture.write_bundle()
+    blobs = list((root / 'objects/blobs').glob('*.json'))
+    missing = next(path for path in blobs if base64.b64decode(json.loads(path.read_text())['content']) == b'y=1\n')
+    saved = missing.read_bytes()
+    missing.unlink()
+    bundle = adapter_module().ConnectorBundle(root, fixture.rules)
+    with pytest.raises(ValueError):
+        bundle.validate()
+    with pytest.raises(ValueError):
+        bundle.validate()
+    missing.write_bytes(saved)
+    assert bundle.validate()['verifiedBlobs'] == 2
+
+
+@pytest.mark.parametrize('damage', ['missing', 'corrupt'])
+def test_excluded_subtree_still_requires_complete_raw_tree_verification(fixture, damage):
+    head = fixture.commit({'src/kept.py': 'x=1\n', 'vendor/nested/omitted.py': 'secret=1\n'})
+    root = fixture.write_bundle()
+    commit = json.loads((root / f'objects/commits/{head}.json').read_text())
+    top = json.loads((root / f"objects/trees/{commit['tree']['sha']}.json").read_text())
+    excluded_sha = next(entry['sha'] for entry in top['tree'] if entry['path'] == 'vendor')
+    excluded_path = root / f'objects/trees/{excluded_sha}.json'
+    if damage == 'missing':
+        excluded_path.unlink()
+    else:
+        mutate_json(excluded_path, lambda item: item['tree'].clear())
+    with pytest.raises(ValueError, match='missing|malformed|SHA mismatch'):
+        adapter_module().ConnectorBundle(root, fixture.rules).validate()

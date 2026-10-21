@@ -69,6 +69,8 @@ class ConnectorBundle:
         self.rules = rules
         self._commits = {}
         self._trees = {}
+        self._tree_indexes = {}
+        self._validated_tree_contexts = set()
         self._flat = OrderedDict()
         self._sizes = {}
         self._verified_blobs = set()
@@ -210,6 +212,73 @@ class ConnectorBundle:
             self._flat.popitem(last=False)
         return result
 
+    def validate_tree_context(self, sha, prefix=''):
+        """Verify every unique tree at every distinct full-path context once.
+
+        A tree SHA alone is not a rules-cache key: the same tree can occur in
+        both vendor/ and src/. Raw tree verification remains SHA-addressed in
+        tree(), while eligibility is memoized by (tree SHA, path prefix).
+        Mark contexts only after all descendants pass, so a failed validation
+        cannot turn a later retry into a false success.
+        """
+        stack = [(sha, prefix, frozenset(), False)]
+        while stack:
+            current, current_prefix, ancestors, complete = stack.pop()
+            key = (current, current_prefix)
+            if key in self._validated_tree_contexts:
+                continue
+            if complete:
+                self._validated_tree_contexts.add(key)
+                continue
+            if current in ancestors:
+                raise ValueError('cyclic Git tree graph')
+            stack.append((current, current_prefix, ancestors, True))
+            for entry in self.tree(current):
+                path = current_prefix + entry['path']
+                if entry['type'] == 'tree':
+                    stack.append((entry['sha'], path + '/', ancestors | {current}, False))
+                elif entry['mode'] in {'100644', '100755'} and self.rules.api_语言(path) is not None:
+                    oid = entry['sha']
+                    if oid not in self._sizes:
+                        raise ValueError('eligible blob is missing its API tree size')
+                    if oid not in self._verified_blobs:
+                        self.blob(oid, self.rules.配置['max_blob_bytes'])
+
+    def tree_index(self, sha):
+        if sha is None:
+            return {}
+        if sha not in self._tree_indexes:
+            self._tree_indexes[sha] = {entry['path']: entry for entry in self.tree(sha)}
+        return self._tree_indexes[sha]
+
+    def diff_trees(self, before, after):
+        """Merkle diff: equal subtree identities need no path expansion.
+
+        Additions/deletions still enumerate the affected subtree. Directory ↔
+        non-directory replacements emit both the old leaf removals and new
+        leaf additions, including symlinks/gitlinks for the engine to discard.
+        """
+        result, stack = [], [(before, after, '')]
+        while stack:
+            left_sha, right_sha, prefix = stack.pop()
+            if left_sha == right_sha:
+                continue
+            left, right = self.tree_index(left_sha), self.tree_index(right_sha)
+            for name in left.keys() | right.keys():
+                old, new = left.get(name), right.get(name)
+                if old is not None and new is not None and (old['mode'], old['sha']) == (new['mode'], new['sha']):
+                    continue
+                path = prefix + name
+                old_tree = old is not None and old['type'] == 'tree'
+                new_tree = new is not None and new['type'] == 'tree'
+                if old_tree or new_tree:
+                    stack.append((old['sha'] if old_tree else None, new['sha'] if new_tree else None, path + '/'))
+                if new is not None and not new_tree:
+                    result.append((path, new['mode'], new['sha']))
+                elif old is not None and not old_tree:
+                    result.append((path, '000000', '0' * 40))
+        return sorted(result)
+
     def blob(self, sha, limit):
         sha = _sha(sha)
         if sha not in self._sizes:
@@ -273,12 +342,7 @@ class ConnectorGitObjects:
         if self._validated:
             return
         for entry in self.api_历史(self.head):
-            for path, (mode, oid) in self.api_文件树(entry['sha']).items():
-                if mode in {'100644', '100755'} and self.bundle.rules.api_语言(path) is not None:
-                    if oid not in self.bundle._sizes:
-                        raise ValueError('eligible blob is missing its API tree size')
-                    if oid not in self.bundle._verified_blobs:
-                        self.bundle.blob(oid, self.bundle.rules.配置['max_blob_bytes'])
+            self.bundle.validate_tree_context(self.bundle.commit(entry['sha'])['tree']['sha'])
         self._validated = True
 
     def api_更新(self, arg_源, arg_分支):
@@ -306,8 +370,7 @@ class ConnectorGitObjects:
         return self.bundle.flat_tree(self.bundle.commit(arg_SHA)['tree']['sha']).copy()
 
     def api_变动(self, arg_前提交, arg_提交):
-        before, after = self.api_文件树(arg_前提交), self.api_文件树(arg_提交)
-        return [(path, *after.get(path, ('000000', '0' * 40))) for path in sorted(before.keys() | after.keys()) if before.get(path) != after.get(path)]
+        return self.bundle.diff_trees(self.bundle.commit(arg_前提交)['tree']['sha'], self.bundle.commit(arg_提交)['tree']['sha'])
 
     def api_读取blob(self, arg_OID, arg_上限):
         return self.bundle.blob(arg_OID, arg_上限)

@@ -26,3 +26,19 @@
 验收发现空态细节仍保留旧周期title，现已清除并加回归；同源合成项没有单一branch，不再显示“尚无默认分支”，改为“公开/私有 · 同源组”。这两处小修在临时预览后仅单测，正式部署后仍须检查，不能把预览旧版验收记作最终生产全链通过。
 
 界面测试与数据重算是两件事：没有新鲜完整数据时显示pending/incomplete；不能用合成预览或旧快照证明全量采集完成。
+
+## 正式根页面复验（公开重算阶段）
+
+2026-10-21 13:08–13:12 UTC，通过同一云端Chrome实际打开 `https://siliconyc.github.io/poly-tally/`。本次是正式根页面，不是Synthetic夹具；只记录当时已发布的公开结果，不代表私有重算完成。
+
+- 页首更新13:03 UTC，明确显示“全量重算未完成 · 当前总量尚不完整，待完整采集后更新。”，未出现旧快照保留提示。默认视图10个公开、0个私有；总行73,987、代码57,140、注释2,391、文档7,660、空行6,796、文件756。
+- 日/周/月×代码/注释/文档/文件共12种组合均真实切换并更新图表标签与桶；日30桶、周/月12桶。月代码图包含−54的负值；当前未完整周期及缺期初说明保留。
+- 仓库构成显示9个正代码项，零代码仓库仍在底部表；Python语言行Enter筛选为15,333，重置回57,140。语言选项及公开JSON末快照语言集合均无JSON/YAML/XML。
+- 清空仓库后，净变化诚实显示无可用历史，`monthly-details`文本及title均为空；重置恢复10项。因此空态title微修已通过正式页面实测。
+- 前台原生点击、Enter、Space复制`SiliconYC/poly-tally`，成功toast与Clipboard读取一致，原生粘贴进搜索框再次确认完整名称；提示自动消失，`role=status`与`aria-live=polite`保留。早先自动locator动作后的Clipboard读数出现滞后，未用那次结果作为成功证据。拒绝/不支持仍仅mock覆盖，未改变真实权限。
+- 普通窗口缩窄并使用125%页面缩放，实测400 CSSpx：顶部176px+176px两列，四个控件均38px、箭头16px；两分析卡各360px，内部clientWidth与scrollWidth均358px；根body宽/scrollWidth均388px，无横向溢出。实际检查净变化与仓库组成图。随后恢复100%及桌面窗口（1182 CSSpx），重置筛选；原GitHub tab保留未操作。
+- 应用源的error日志为空。本轮未尝试DevTools、data导航、本地端口或权限设置，也未重新部署预览。
+
+通过单独打开公开 `data/stats.json` 页面并只读DOM解析摘要：`datasetEpoch=source-only-lineage-2026-10-21-v1`，`rules.version=936a6214dbf54445`，`generatedAt=2026-10-21T13:03:19.762260Z`；publicCompleteness为complete=true、11/11、failed=0，而整体complete=false。privateStatus为pending-rebuild、privateCompleteness=null、privateRepositories=0。共11条记录，其中Fabulous为empty且无历史，解释默认显示10项；同源记录为0。
+
+**尚未验收：**真实私有同源组尚未发布，因此“私有 · 同源组”行、真实代表成员名称与组内唯一主导值仍待该数据上线后复验；本次不为任何私有结果或整体重算完成背书。
