@@ -10,7 +10,7 @@ from poly_tally.rules import 规则_类
 # ◕ 功能
 class 收录边界测试_类(unittest.TestCase):
     """
-    用实际误计类型验证全局规则，同时保护配置、测试和手写文档。
+    用实际误计类型验证全局规则；保留源码与手写文档，不保留数据型配置。
 
     更新日志：
     2026.10.21 - 覆盖已跟踪依赖、日志、机器结果与有明确标记的生成内容。
@@ -42,19 +42,19 @@ class 收录边界测试_类(unittest.TestCase):
             with self.subTest(路径=路径):
                 self.assertIsNone(self.规则.api_语言(路径))
 
-    def test_保留手写源码配置测试主题与历史文档(self) -> None:
+    def test_保留手写源码测试主题与历史文档(self) -> None:
         路径表 = {
             "src/App.tsx": "TSX", "src/logging.py": "Python", "src/debug.py": "Python",
-            "tests/test_logging.py": "Python", "tests/fixtures/scenario.json": "JSON",
-            "package.json": "JSON", "src/data/levels.json": "JSON", "settings.json": "JSON",
+            "tests/test_logging.py": "Python", "tests/fixtures/scenario.json": None,
+            "package.json": None, "src/data/levels.json": None, "settings.json": None,
             "src/themes/dark.css": "CSS", "static/index.html": "HTML",
             "X_文档/01.简介/版本历史/2026.08.26-S6-R121.md": "Markdown",
             "docs/logging.md": "Markdown", "docs/架构设计.md": "Markdown",
             "src/registry.cpp": "C++", "src/compute.cu": "CUDA",
             "src/renderer.pyx": "Cython", "src/renderer.pxd": "Cython",
-            "src/results/index.ts": "TypeScript", ".cm/config.json": "JSON",
-            "src/log/parser.py": "Python", "src/config/performance.json": "JSON",
-            "tests/fixtures/expected-report.json": "JSON", "tests/fixtures/results/expected.json": "JSON",
+            "src/results/index.ts": "TypeScript", ".cm/config.json": None,
+            "src/log/parser.py": "Python", "src/config/performance.json": None,
+            "tests/fixtures/expected-report.json": None, "tests/fixtures/results/expected.json": None,
             "docs/reports/README.txt": "Text",
             "tools/log/parser.py": "Python",
             "docs/log/format.md": "Markdown", "docs/reports/proposal.txt": "Text",

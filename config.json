@@ -1,4 +1,15 @@
 {
+  "datasetEpoch": "source-only-lineage-2026-10-21-v1",
+  "lineageGroups": [
+    {
+      "id": "vitro",
+      "members": [
+        "SiliconYC/vitro",
+        "SiliconYC/vitro_zero_lab",
+        "SiliconYC/vitro_union_lab"
+      ]
+    }
+  ],
   "owners": [
     "SiliconYC"
   ],
@@ -156,6 +167,18 @@
       "**/*文档/*.rst",
       "**/*文档/*.txt",
       "**/*文档/*.tex"
+    ],
+    "exclude_extensions": [
+      ".json",
+      ".jsonc",
+      ".yaml",
+      ".yml",
+      ".xml"
+    ],
+    "exclude_languages": [
+      "JSON",
+      "YAML",
+      "XML"
     ]
   }
 }

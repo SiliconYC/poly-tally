@@ -11,6 +11,7 @@ from poly_tally.engine import 历史引擎_类
 from poly_tally.export import 公开导出_类
 from poly_tally.github import GitHub发现器_类
 from poly_tally.rules import 规则_类
+from poly_tally.lineage import validate_groups, member_names, lineage_version, collapse_repositories
 
 
 # ◕ 功能
@@ -30,6 +31,7 @@ class 采集器_类:
         arg_仅公开: bool,
         arg_仅私有: bool = False,
         arg_数据批次: str | None = None,
+        arg_预期清单: dict | None = None,
     ) -> None:
         self.配置 = arg_配置
         if not arg_配置["owners"]:
@@ -38,14 +40,34 @@ class 采集器_类:
         self.引擎 = 历史引擎_类(arg_目录, self.规则)
         self.数据批次 = arg_数据批次
         self.引擎.数据库.数据批次 = arg_数据批次
+        self.同源组 = validate_groups(arg_配置.get("lineageGroups", []))
+        self.成员名称 = member_names(self.同源组)
+        self.引擎.数据库.lineage_groups = self.同源组
+        self.引擎.数据库.lineage_enabled = "lineageGroups" in arg_配置
+        if "lineageGroups" in arg_配置:
+            try:
+                self.引擎.数据库.api_绑定批次(arg_数据批次, self.规则.版本 + ":" + lineage_version(self.同源组))
+            except ValueError:
+                self.引擎.api_关闭()
+                raise
         self.发现器 = GitHub发现器_类(arg_令牌, arg_仅公开)
         self.仅公开 = arg_仅公开
         self.仅私有 = arg_仅私有
+        self.预期清单 = self._校验预期清单(arg_预期清单) if arg_预期清单 is not None else []
 
     def api_采集(self) -> dict:
         开始 = time.monotonic()
         基线 = self.引擎.计数.copy()
         失败 = 0
+        发现完整 = True
+        缺成员 = 0
+        预期 = {item["id"] for item in self.预期清单 if
+            (not item["archived"] or item["name"].casefold() in self.成员名称)
+            and (self._名称在范围(item["name"]) or item["name"].casefold() in self.成员名称)
+            and (not self.仅公开 or item["visibility"] == "public")
+            and (not self.仅私有 or item["visibility"] == "private" or item["name"].casefold() in self.成员名称)}
+        清单预期 = 预期.copy()
+        已扫描 = set()
         公开失败 = 0
         公开计数 = {键: 0 for 键 in 基线}
         已见: set[str] = set()
@@ -61,6 +83,7 @@ class 采集器_类:
         try:
             元数据表 = self.发现器.api_发现(self.配置["owners"])
         except (requests.RequestException, ValueError) as 异常:
+            发现完整 = False
             for 仓库 in 已知.values():
                 if 仓库["status"] not in {"cold", "archived"}:
                     self._失败状态(仓库, "仓库发现失败；保留最后成功历史，等待下一轮重试")
@@ -68,6 +91,16 @@ class 采集器_类:
             公开失败 = max(1, sum(not 项["private"] for 项 in 已知.values()))
             元数据表 = []
             已见.update(已知)
+        # Explicit groups must be complete, including archived/public members in
+        # a private job. Public-only cannot prove private access and defers groups.
+        if not self.仅公开:
+            发现名称 = {item["full_name"].casefold() for item in 元数据表}
+            for 名称 in sorted(self.成员名称 - 发现名称):
+                try:
+                    元数据表.append(self.发现器.api_读取仓库(名称))
+                except (requests.RequestException, ValueError):
+                    缺成员 += 1
+                    失败 += 1
         for 元数据 in 元数据表:
             ID = str(元数据["id"])
             已见.add(ID)
@@ -75,13 +108,14 @@ class 采集器_类:
             if 旧状态:
                 旧状态.update({"private": 元数据["private"], "name": 元数据["full_name"], "url": f"https://github.com/{元数据['full_name']}"})
                 self.引擎.数据库.api_保存仓库(旧状态)
-            if 元数据.get("archived") is True:
+            是成员 = 元数据["full_name"].casefold() in self.成员名称
+            if 元数据.get("archived") is True and not 是成员:
                 self._排除归档(元数据)
                 continue
-            if self.仅私有 and not 元数据["private"]:
+            if self.仅私有 and not 元数据["private"] and not 是成员:
                 continue
             # 显式确认的冷数据不会因同名或列表重新出现而自动激活。
-            if 旧状态 and 旧状态["status"] == "cold":
+            if 旧状态 and 旧状态["status"] == "cold" and not 是成员:
                 continue
             if self.仅公开 and 元数据["private"]:
                 continue
@@ -91,6 +125,7 @@ class 采集器_类:
                     旧状态.update({"status": "excluded", "private": 元数据["private"], "name": 元数据["full_name"], "notice": "当前账号或全局仓库规则已排除；已采集历史仍保留"})
                     self.引擎.数据库.api_保存仓库(旧状态)
                 continue
+            预期.add(ID)
             仓库基线 = self.引擎.计数.copy()
             try:
                 print(f"[开始] 扫描仓库 {元数据['full_name']}", flush=True)
@@ -101,7 +136,9 @@ class 采集器_类:
                     状态 = self._空状态(元数据)
                     self.引擎.数据库.api_保存仓库(状态)
                 else:
-                    self.引擎.api_同步(元数据, 元数据["clone_url"], HEAD)
+                    # Archived is a scan exclusion only for ordinary repositories.
+                    self.引擎.api_同步({**元数据, "archived": False} if 是成员 else 元数据, 元数据["clone_url"], HEAD)
+                已扫描.add(ID)
             except (requests.RequestException, RuntimeError, OSError, subprocess.TimeoutExpired) as 异常:
                 状态 = 旧状态 or self._空状态(元数据)
                 状态["private"] = 元数据["private"]
@@ -118,7 +155,7 @@ class 采集器_类:
                     for 键 in 公开计数:
                         公开计数[键] += self.引擎.计数[键] - 仓库基线[键]
         for ID, 状态 in 已知.items():
-            if self.仅私有 and not 状态["private"]:
+            if self.仅私有 and not 状态["private"] and 状态["name"].casefold() not in self.成员名称:
                 continue
             if ID in 已见:
                 continue
@@ -158,11 +195,39 @@ class 采集器_类:
             失败 += 1
             if not 状态["private"]:
                 公开失败 += 1
+        if 清单预期 - 已扫描:
+            失败 = max(失败, len(清单预期 - 已扫描))
+            if self.仅公开:
+                公开失败 = max(公开失败, len(清单预期 - 已扫描))
         仓库表 = [项 for 项 in self.引擎.api_仓库列表() if 项["status"] != "archived"]
         公共运行 = {"finishedAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"), "durationSeconds": round(time.monotonic() - 开始, 3), "repositories": sum(not 项["private"] for 项 in 仓库表), "failed": 公开失败, **公开计数}
         运行 = {**公共运行, "repositories": len(仓库表), "failed": 失败, **{键: self.引擎.计数[键] - 基线[键] for 键 in 基线}, "publicRun": 公共运行}
+        if self.引擎.数据库.lineage_enabled:
+            if not self.仅公开:
+                try:
+                    collapse_repositories(self.引擎.api_仓库列表(), self.同源组, self.规则.版本)
+                except ValueError:
+                    失败 = max(失败, 1)
+                    运行["failed"] = 失败
+            完整性 = {"complete": 发现完整 and 失败 == 0 and 缺成员 == 0 and 预期 == 已扫描, "discoveryComplete": 发现完整, "expectedRepositories": len(预期) + 缺成员, "scannedRepositories": len(已扫描), "missingMembers": 缺成员, "failed": 失败}
+            运行["completeness"] = 完整性
+            公共运行["completeness"] = {**完整性, "complete": 发现完整 and 公开失败 == 0, "expectedRepositories": sum(not item["private"] and item["id"] in 预期 for item in 仓库表), "scannedRepositories": sum(not item["private"] and item["id"] in 已扫描 for item in 仓库表), "missingMembers": 0, "failed": 公开失败}
         self.引擎.数据库.api_记录运行(运行)
         return 运行
+
+    @staticmethod
+    def _校验预期清单(inventory: dict) -> list[dict]:
+        # Optional fresh metadata audit, not old statistics and not a permanent
+        # manually curated repository allow-list. Discovery remains automatic.
+        if not isinstance(inventory, dict) or not isinstance(inventory.get("source"), str) or not isinstance(inventory.get("verifiedAt"), str) or not isinstance(inventory.get("repositories"), list):
+            raise ValueError("invalid expected inventory")
+        datetime.fromisoformat(inventory["verifiedAt"])
+        ids = set()
+        for item in inventory["repositories"]:
+            if not isinstance(item, dict) or not isinstance(item.get("id"), str) or not item["id"] or item["id"] in ids or not isinstance(item.get("name"), str) or item.get("visibility") not in {"private", "public"} or type(item.get("archived")) is not bool:
+                raise ValueError("invalid expected repository inventory")
+            ids.add(item["id"])
+        return inventory["repositories"]
 
     def _排除归档(self, arg_元数据: dict) -> None:
         # 只保留稳定 ID 的归档证据，不保留可进入统计的旧历史、HEAD 或文件清单。
@@ -175,6 +240,8 @@ class 采集器_类:
         return 所有者 in {账号.casefold() for 账号 in self.配置["owners"]} and any(规则_类.api_匹配(arg_全名.casefold(), 模式.casefold()) for 模式 in self.配置["repositories"]["include"]) and not any(规则_类.api_匹配(arg_全名.casefold(), 模式.casefold()) for 模式 in self.配置["repositories"]["exclude"])
 
     def _纳入(self, arg_元数据: dict) -> bool:
+        if arg_元数据["full_name"].casefold() in self.成员名称:
+            return True
         return not arg_元数据.get("archived", False) and self._名称在范围(arg_元数据["full_name"]) and (not arg_元数据["fork"] or self.规则.配置["include_forks"])
 
     def _空状态(self, arg_元数据: dict) -> dict:
@@ -210,6 +277,8 @@ class 采集器_类:
         if any(项["private"] for 项 in 仓库表):
             raise ValueError("公开检查点禁止包含私有仓库；私有状态请使用 SQLite backup")
         数据 = {"schemaVersion": 1, "repositories": 仓库表, "generatedAt": datetime.now(timezone.utc).isoformat()}
+        if self.引擎.数据库.lineage_enabled:
+            数据["lineageVersion"] = lineage_version(self.同源组)
         if self.数据批次:
             数据["datasetEpoch"] = self.数据批次
             运行 = self.引擎.数据库.api_最近运行()
@@ -227,6 +296,8 @@ class 采集器_类:
             raise ValueError("检查点缺少生成时间或仓库列表")
         if self.数据批次 and 数据.get("datasetEpoch") != self.数据批次:
             raise ValueError("检查点批次不匹配；新批次必须从当前默认分支重新采集")
+        if self.引擎.数据库.lineage_enabled and 数据.get("lineageVersion") != lineage_version(self.同源组):
+            raise ValueError("检查点 lineage epoch 契约不匹配；禁止旧数据进入重算")
         已见: set[str] = set()
         写入: list[tuple[str, str]] = []
         for 仓库 in 数据["repositories"]:

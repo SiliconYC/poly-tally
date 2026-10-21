@@ -8,6 +8,7 @@ import hashlib
 import os
 
 from poly_tally.metrics import 行统计_类
+from poly_tally.lineage import export_repositories, last_commit_date, lineage_version
 from poly_tally.rules import 规则_类
 from poly_tally.store import 数据库_类
 
@@ -34,7 +35,7 @@ class 私有规模导出_类:
 
     def api_构建(self, arg_时间: datetime | None = None) -> dict:
         现在 = (arg_时间 or datetime.now(timezone.utc)).astimezone(timezone.utc)
-        全部仓库 = self.数据库.api_仓库列表()
+        全部仓库 = export_repositories(self.数据库, self.规则.版本)
         私有表 = [项 for 项 in 全部仓库 if 项["private"]]
         # 归档与可见性无关；私有转公开再归档也必须提供排除证据。
         归档键 = sorted(self.api_匿名键(项["id"]) for 项 in 全部仓库 if 项["status"] == "archived")
@@ -59,6 +60,11 @@ class 私有规模导出_类:
                 项 = 日表[日期]
                 if not 历史 or 项["metrics"] != 历史[-1]["metrics"] or 项["languages"] != 历史[-1]["languages"]:
                     历史.append(项)
-            结果.append({"id": f"private-{匿名键}", "sourceKey": 匿名键, "name": 仓库["name"], "url": None, "branch": None, "head": None, "visibility": "private", "snapshotKind": "daily", "status": 仓库["status"], "lastSuccessAt": 仓库["lastSuccessAt"], "rulesVersion": 仓库["rulesVersion"], "historyComplete": 仓库["historyComplete"], "notice": self.公开说明, "history": 历史, "skippedFiles": 仓库["skippedFiles"]})
+            结果.append({**({"lineage": 仓库["lineage"]} if "lineage" in 仓库 else {}), "lastCommitDate": 仓库.get("lastCommitDate", last_commit_date(仓库)), "id": f"private-{匿名键}", "sourceKey": 匿名键, "name": 仓库["name"], "url": None, "branch": None, "head": None, "visibility": "private", "snapshotKind": "daily", "status": 仓库["status"], "lastSuccessAt": 仓库["lastSuccessAt"], "rulesVersion": 仓库["rulesVersion"], "historyComplete": 仓库["historyComplete"], "notice": self.公开说明, "history": 历史, "skippedFiles": 仓库["skippedFiles"]})
         来源 = "github-actions" if os.environ.get("GITHUB_ACTIONS") == "true" else "local"
-        return {**({"datasetEpoch": self.数据库.数据批次} if getattr(self.数据库, "数据批次", None) else {}), "schemaVersion": 1, "archivedRepositoryKeys": 归档键, "generatedAt": 现在.isoformat().replace("+00:00", "Z"), "rulesVersion": self.规则.版本, "source": 来源, "collection": {"repositories": len(结果), "failed": sum(项["status"] in {"stale", "inaccessible"} for 项 in 结果)}, "repositories": 结果}
+        额外 = {}
+        if getattr(self.数据库, "lineage_enabled", False) or getattr(self.数据库, "lineage_groups", []):
+            运行 = self.数据库.api_最近运行()
+            完整性 = 运行[0].get("completeness") if 运行 else None
+            额外 = {"lineageVersion": lineage_version(getattr(self.数据库, "lineage_groups", [])), "completeness": 完整性 or {"complete": False, "discoveryComplete": False, "expectedRepositories": 0, "scannedRepositories": 0, "missingMembers": 0, "failed": 0}}
+        return {**额外, **({"datasetEpoch": self.数据库.数据批次} if getattr(self.数据库, "数据批次", None) else {}), "schemaVersion": 1, "archivedRepositoryKeys": 归档键, "generatedAt": 现在.isoformat().replace("+00:00", "Z"), "rulesVersion": self.规则.版本, "source": 来源, "collection": {"repositories": len(结果), "failed": sum(项["status"] in {"stale", "inaccessible"} for 项 in 结果)}, "repositories": 结果}

@@ -97,7 +97,7 @@ class GitHub发现器测试_类(unittest.TestCase):
         self.assertTrue(发送.call_args_list[1].args[0].url.endswith("/branches/release%2Fnext"))
 
     def test_空仓库与不可访问错误必须区分(self) -> None:
-        for 大小, 状态, 期望空 in [(0, 404, True), (0, 409, True), (5, 404, False), (5, 409, False), (0, 403, False)]:
+        for 大小, 状态, 期望空 in [(0, 404, False), (0, 409, False), (5, 404, False), (5, 409, False), (0, 403, False)]:
             with self.subTest(大小=大小, 状态=状态):
                 仓库 = self._仓库(1, "Alice/one")
                 仓库["size"] = 大小
@@ -108,12 +108,34 @@ class GitHub发现器测试_类(unittest.TestCase):
                         with self.assertRaises(requests.HTTPError):
                             GitHub发现器_类().api_读取默认分支(仓库)
 
-    def test_无默认分支无需请求(self) -> None:
+    def test_无默认分支仍需可读分支列表确认空(self) -> None:
         仓库 = self._仓库(1, "Alice/one")
         仓库["default_branch"] = None
         仓库["size"] = 0
-        with patch("requests.Session.send", side_effect=AssertionError("不应请求")):
+        with patch("requests.Session.send", return_value=self._响应([])) as 发送:
             self.assertIsNone(GitHub发现器_类().api_读取默认分支(仓库))
+        self.assertEqual(发送.call_count, 1)
+        self.assertTrue(发送.call_args.args[0].url.endswith("/branches?per_page=1"))
+
+    def test_空仓库需要分支列表HTTP200空数组的肯定证据(self) -> None:
+        仓库 = self._仓库(1, "Alice/one", True)
+        仓库["size"] = 0
+        for 状态 in (404, 409):
+            with self.subTest(状态=状态), patch("requests.Session.send", side_effect=[self._响应({"message": "Not Found"}, 状态), self._响应([])]) as 发送:
+                self.assertIsNone(GitHub发现器_类("fixture").api_读取默认分支(仓库))
+                self.assertEqual(发送.call_count, 2)
+                self.assertTrue(发送.call_args.args[0].url.endswith("/branches?per_page=1"))
+        for 数据 in ([{"name": "other"}], {"message": "Not Found"}):
+            with self.subTest(数据=数据), patch("requests.Session.send", side_effect=[self._响应({}, 404), self._响应(数据)]):
+                with self.assertRaises(requests.HTTPError):
+                    GitHub发现器_类("fixture").api_读取默认分支(仓库)
+
+    def test_默认分支缺失也不能掩盖Contents权限错误(self) -> None:
+        仓库 = self._仓库(1, "Alice/one", True)
+        仓库.update({"size": 0, "default_branch": None})
+        with patch("requests.Session.send", return_value=self._响应({"message": "Not Found"}, 404)):
+            with self.assertRaises(requests.HTTPError):
+                GitHub发现器_类("fixture").api_读取默认分支(仓库)
 
     def test_网络错误与服务错误可有限重试(self) -> None:
         仓库 = self._仓库(1, "Alice/one")
