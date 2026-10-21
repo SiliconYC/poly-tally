@@ -38,7 +38,10 @@ class Test私有发布_类(unittest.TestCase):
 
     def test_私有日级最新快照且不公开提交细节(self) -> None:
         数据 = 私有规模导出_类(self.库, self.规则).api_构建(self.现在)
-        文本 = json.dumps(数据, ensure_ascii=False)
+        self.assertEqual(数据["repositories"][0]["name"], "sensitive-owner/sensitive-project")
+        仅审计受限字段 = copy.deepcopy(数据)
+        仅审计受限字段["repositories"][0]["name"] = "已授权公开的仓库名"
+        文本 = json.dumps(仅审计受限字段, ensure_ascii=False)
         self.assertNotIn("sensitive", 文本)
         self.assertNotIn("123456789", 文本)
         self.assertNotIn("committedAt", 文本)
@@ -59,6 +62,8 @@ class Test私有发布_类(unittest.TestCase):
         数据 = 公开导出_类(self.库, self.规则, True).api_构建()
         self.assertEqual(数据["summary"]["code"], 21)
         self.assertEqual(数据["summary"]["privateRepositories"], 1)
+        self.assertEqual(数据["repositories"][0]["name"], self.私有["name"])
+        数据["repositories"][0]["name"] = "已授权公开的仓库名"
         self.assertNotIn("sensitive", json.dumps(数据))
 
     def test_与公开仓库同口径汇总(self) -> None:
@@ -81,11 +86,12 @@ class Test私有发布_类(unittest.TestCase):
     def test_匿名标识稳定且只导出私有(self) -> None:
         导出器 = 私有规模导出_类(self.库, self.规则)
         原ID = 导出器.api_构建(self.现在)["repositories"][0]["id"]
-        self.私有["name"] = "another-sensitive-name"
+        self.私有["name"] = "sensitive-owner/renamed-project"
         self.私有["status"] = "cold"
         self.库.api_保存仓库(self.私有)
         仓库 = 导出器.api_构建(self.现在)["repositories"][0]
         self.assertEqual(仓库["id"], 原ID)
+        self.assertEqual(仓库["name"], "sensitive-owner/renamed-project")
         self.assertEqual(仓库["status"], "cold")
         self.私有["private"] = False
         self.库.api_保存仓库(self.私有)

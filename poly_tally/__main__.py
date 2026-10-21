@@ -24,7 +24,7 @@ def 主入口() -> int:
     范围参数.add_argument("--public-only", action="store_true", help="仅发现和计算公开仓库")
     范围参数.add_argument("--private-only", action="store_true", help="仅采集授权范围的私有仓库")
     参数器.add_argument("--git-credential", action="store_true", help="从已配置的 Git credential helper 读取 GitHub 凭证，仅在内存使用")
-    参数器.add_argument("--include-private-metrics", action="store_true", help="公开匿名私有日级规模，仍排除源码和 Git 提交细节")
+    参数器.add_argument("--include-private-metrics", action="store_true", help="公开私有仓库名称与日级规模，仍排除源码和 Git 提交细节")
     参数器.add_argument("--private-metrics-output", type=Path, help="额外写入可公开的私有日级规模文件，配合 --include-private-metrics")
     参数器.add_argument("--refresh", action="store_true", help="无规模变化时也刷新静态产物的扫描时间，不制造数据提交")
     参数器.add_argument("--allow-partial", action="store_true", help="部分源仓库不可访问时保留旧数据、报告状态并允许发布")

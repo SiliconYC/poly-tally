@@ -97,3 +97,38 @@ test('load rejects unavailable, malformed or unsupported data and accepts valid 
   await assert.rejects(() => loadStats(async () => ({ ok: true, json: async () => ({ schemaVersion: 1, repositories: [{}] }) })), /数据/);
   assert.deepEqual(await loadStats(async () => ({ ok: true, json: async () => dataset([]) })), dataset([]));
 });
+
+test('repository sorting handles names, selected metric, dates and unavailable values without mutating source', () => {
+  const repositories = [repo('b', [snapshot(day(1), 20, 'Python', 3)], { lastSuccessAt: null }), repo('a', [snapshot(day(1), 5, 'Python', 9)], { lastSuccessAt: day(2) }), repo('c', [], { lastSuccessAt: day(1) })];
+  assert.deepEqual(model.sortRepositories?.(repositories, { key: 'name' }).map(r => r.id), ['a', 'b', 'c']);
+  assert.deepEqual(model.sortRepositories?.(repositories, { key: 'metric', direction: 'desc', metric: 'documentation' }).map(r => r.id), ['a', 'b', 'c']);
+  assert.deepEqual(model.sortRepositories?.(repositories, { key: 'updated', direction: 'asc' }).map(r => r.id), ['c', 'a', 'b']);
+  assert.deepEqual(model.sortRepositories?.(repositories, { key: 'updated', direction: 'desc' }).map(r => r.id), ['a', 'c', 'b']);
+  assert.deepEqual(repositories.map(r => r.id), ['b', 'a', 'c']);
+});
+
+test('picker searches full repository names and sorts scale by the selected language and metric', () => {
+  const repositories = [repo('alpha', [snapshot(day(1), 20, 'Python', 1)]), repo('beta', [snapshot(day(1), 5, 'Rust', 8)])];
+  assert.deepEqual(model.repositoryOptions?.(repositories, { query: ' OWNER/ALP ' }).map(r => r.id), ['alpha']);
+  assert.deepEqual(model.repositoryOptions?.(repositories, { key: 'metric', direction: 'desc', metric: 'documentation' }).map(r => r.id), ['beta', 'alpha']);
+  assert.deepEqual(model.repositoryOptions?.(repositories, { key: 'metric', direction: 'desc', language: 'Python' }).map(r => r.id), ['alpha', 'beta']);
+});
+
+test('period change uses real stock at the window boundary and the chosen metric', () => {
+  const repositories = [repo('a', [snapshot(day(1), 10, 'Python', 5), snapshot(day(20), 18, 'Python', 3)]), repo('b', [snapshot(day(1), 20, 'Rust', 2), snapshot(day(21), 21, 'Rust', 7)])];
+  assert.deepEqual(model.stockChange?.(repositories, { since: day(19), until: day(20), metric: 'documentation' }), { baseline: 7, latest: 5, change: -2, missing: 0 });
+  assert.deepEqual(model.stockChange?.(repositories, { since: day(19), until: day(21), language: 'Python' }), { baseline: 10, latest: 18, change: 8, missing: 0 });
+});
+
+test('period change does not pretend that missing earlier stock was zero', () => {
+  const repositories = [repo('a', [snapshot(day(20), 20)])];
+  assert.deepEqual(model.stockChange?.(repositories, { since: day(19), until: day(21) }), { baseline: null, latest: 20, change: null, missing: 1 });
+  assert.deepEqual(model.stockChange?.([], { since: day(19), until: day(21) }), { baseline: null, latest: 0, change: null, missing: 0 });
+  assert.deepEqual(model.stockChange?.(repositories, { since: day(20), until: day(21) }), { baseline: 20, latest: 20, change: 0, missing: 0 });
+});
+
+test('language overview supports ascending scale and reversible name ordering', () => {
+  const repositories = [repo('a', [snapshot(day(1), 10, 'Python')]), repo('b', [snapshot(day(1), 20, 'Rust')])];
+  assert.deepEqual(languageTotals(repositories, 'code', { key: 'value', direction: 'asc' }).map(row => row.name), ['Python', 'Rust']);
+  assert.deepEqual(languageTotals(repositories, 'code', { key: 'name', direction: 'desc' }).map(row => row.name), ['Rust', 'Python']);
+});

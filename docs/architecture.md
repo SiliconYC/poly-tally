@@ -12,7 +12,7 @@
 | `poly_tally/store.py` | SQLite 仓库状态、解析缓存、运行摘要与一致性备份 |
 | `poly_tally/collector.py` | 生命周期状态、范围变更、公开检查点与恢复 |
 | `poly_tally/export.py` | 公开字段白名单、静态数据指纹和原子替换 |
-| `poly_tally/private_metrics.py` | 私有逐提交事实降为匿名日级规模 |
+| `poly_tally/private_metrics.py` | 私有逐提交事实降为日级规模，保留授权公开的仓库名 |
 | `poly_tally/credentials.py` | 显式读取环境令牌或本地 Git credential helper |
 | `poly_tally/lock.py` | POSIX 进程锁，支持 macOS / Linux |
 | `poly_tally/__main__.py` | 手动和定时任务共用命令入口 |
@@ -42,7 +42,7 @@
 
 `history` 中每个快照含 `sha`、`timestamp`、`committedAt`、`authoredAt`、`metrics` 和 `languages`。`metrics` 为 `{code, comment, blank, documentation, files}`，`languages` 按语言名映射至同形指标。
 
-上述提交字段只适用于公开仓库。私有记录使用 `visibility: private`、`snapshotKind: daily` 和匿名标识，`url` / `branch` / `head` 为 `null`；其 `history` 只有 `timestamp`、`metrics`、`languages`。`publication` 单独保存私有采集时间、来源与可用状态。私有快照包的字段白名单与合并逻辑由 `scripts/metrics.mjs` 校验，不能把完整私有状态当作快照包上传。
+上述提交字段只适用于公开仓库。私有记录使用 `visibility: private`、`snapshotKind: daily` 和稳定标识，`name` 按用户要求保留真实仓库名，`url` / `branch` / `head` 为 `null`；其 `history` 只有 `timestamp`、`metrics`、`languages`。`publication` 单独保存私有采集时间、来源与可用状态。私有快照包的字段白名单与合并逻辑由 `scripts/metrics.mjs` 校验，兼容旧匿名显示名，但不能把完整私有状态当作快照包上传。
 
 浏览器对各仓库按归一化时点进行阶梯合并，某仓库第一条快照之前视为零，其后保持最后已知状态。某一仓库的同刻提交以拓扑中最后一个为准；所有仓库同刻更新后再输出一个观察点。
 

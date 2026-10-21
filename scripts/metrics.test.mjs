@@ -27,6 +27,20 @@ test('accepts the sanitized daily envelope including an empty inventory', () => 
   assert.equal(validatePrivateMetrics(envelope([])), true);
 });
 
+test('publishes authorized real names while retaining stable identities and legacy aliases', () => {
+  const previous = envelope();
+  const next = envelope([privateRepository('101', {name: 'example-owner/private-project'})]);
+  assert.equal(validatePrivateMetrics(next), true);
+  assert.equal(metricsModule.validatePrivateMetricsReplacement(previous, next), true);
+  const result = mergePrivateMetrics(publicStats([]), next);
+  assert.equal(result.repositories[0].name, 'example-owner/private-project');
+  assert.equal(result.repositories[0].id, previous.repositories[0].id);
+  assert.deepEqual(result.repositories[0].history, previous.repositories[0].history);
+  for (const name of ['../private', 'owner/repo/sha', '<script>secret</script>', 'owner/repo\nmessage', 'owner/..', '私有仓库 · badbad']) {
+    assert.throws(() => validatePrivateMetrics(envelope([privateRepository('101', {name})])));
+  }
+});
+
 test('rejects raw private metadata at every nested boundary without echoing it', () => {
   const sentinel = 'SENSITIVE-owner/path-and-message';
   const cases = [
@@ -35,7 +49,7 @@ test('rejects raw private metadata at every nested boundary without echoing it',
     data => { data.repositories[0].url = `https://github.com/${sentinel}`; },
     data => { data.repositories[0].inventory = {[sentinel]: {}}; },
     data => { data.repositories[0].notice = sentinel; },
-    data => { data.repositories[0].name = sentinel; },
+    data => { data.repositories[0].name = sentinel + '/raw-file.py'; },
     data => { data.repositories[0].history[0].sha = sentinel; },
     data => { data.repositories[0].history[0].metrics.path = sentinel; },
     data => { data.repositories[0].history[0].languages[sentinel] = metrics(1); },

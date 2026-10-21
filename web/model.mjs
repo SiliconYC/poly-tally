@@ -41,13 +41,13 @@ export function latestTotals(repositories, language = 'all') {
   return total;
 }
 
-export function languageTotals(repositories, metric = 'code') {
+export function languageTotals(repositories, metric = 'code', { key = 'value', direction = 'desc' } = {}) {
   const totals = new Map();
   for (const repository of repositories) {
     const snapshot = sortedHistory(repository).at(-1);
     for (const [name, metrics] of Object.entries(snapshot?.languages ?? {})) totals.set(name, (totals.get(name) ?? 0) + numeric(metrics[metric]));
   }
-  return [...totals].map(([name, value]) => ({ name, value })).filter(language => language.value > 0).sort((a, b) => b.value - a.value || a.name.localeCompare(b.name));
+  return [...totals].map(([name, value]) => ({ name, value })).filter(language => language.value > 0).sort((a, b) => (key === 'name' ? a.name.localeCompare(b.name) : a.value - b.value) * (direction === 'desc' ? -1 : 1) || a.name.localeCompare(b.name));
 }
 
 export function aggregateHistory(repositories, { language = 'all', metric = 'code', since, until } = {}) {
@@ -96,4 +96,41 @@ export async function loadStats(fetcher = fetch) {
   );
   if (!Number.isFinite(instant(data.generatedAt)) || !data.rules?.version || !Array.isArray(data.repositories) || !data.repositories.every(repository => typeof repository.id === 'string' && typeof repository.name === 'string' && typeof repository.status === 'string' && Array.isArray(repository.history) && repository.history.every(snapshot => Number.isFinite(instant(snapshot.timestamp)) && validMetrics(snapshot.metrics) && snapshot.languages && Object.values(snapshot.languages).every(validMetrics)) && validPrivate(repository))) throw new Error('统计数据结构不完整或存在无效数值。');
   return data;
+}
+
+export function sortRepositories(repositories, { key = 'name', direction = 'asc', metric = 'code', language = 'all' } = {}) {
+  const compareNames = (a, b) => a.name.localeCompare(b.name, 'zh-CN', { numeric: true, sensitivity: 'base' }) || a.id.localeCompare(b.id);
+  const value = repository => {
+    if (key === 'metric') return repository.history.length ? latestTotals([repository], language)[metric] : null;
+    if (key === 'updated') return Number.isFinite(instant(repository.lastSuccessAt)) ? instant(repository.lastSuccessAt) : null;
+    if (key === 'status') return STATUS_LABELS[repository.status] ?? repository.status;
+    if (key === 'rules') return repository.rulesVersion || null;
+    return repository.name;
+  };
+  return [...repositories].sort((a, b) => {
+    const left = value(a), right = value(b);
+    if (left === null || right === null) return left === right ? compareNames(a, b) : left === null ? 1 : -1;
+    const result = typeof left === 'number' ? left - right : String(left).localeCompare(String(right), 'zh-CN', { numeric: true, sensitivity: 'base' });
+    return result * (direction === 'desc' ? -1 : 1) || compareNames(a, b);
+  });
+}
+
+export function repositoryOptions(repositories, { query = '', ...sorting } = {}) {
+  const search = query.trim().toLocaleLowerCase();
+  return sortRepositories(repositories.filter(repository => repository.name.toLocaleLowerCase().includes(search)), sorting);
+}
+
+export function stockChange(repositories, { since, until, language = 'all', metric = 'code' } = {}) {
+  let baseline = 0, latest = 0, missing = 0;
+  const start = instant(since), end = instant(until);
+  for (const repository of repositories) {
+    const history = sortedHistory(repository).filter(snapshot => snapshot.time <= end);
+    const before = history.filter(snapshot => snapshot.time <= start).at(-1);
+    if (!before) missing++;
+    else baseline += numeric(snapshotMetrics(before, language)?.[metric]);
+    latest += numeric(snapshotMetrics(history.at(-1), language)?.[metric]);
+  }
+  // 首次采集前没有事实基线：首次看到的存量不能被解释成期间新增。
+  if (!repositories.length || missing) return { baseline: null, latest, change: null, missing };
+  return { baseline, latest, change: latest - baseline, missing: 0 };
 }

@@ -6,7 +6,7 @@
 
 [工程约定 Discussion #1](https://github.com/SiliconYC/poly-tally/discussions/1) · [实施与验收 Issue #2](https://github.com/SiliconYC/poly-tally/issues/2) · [采集和部署](https://github.com/SiliconYC/poly-tally/actions/workflows/pages.yml)
 
-私有仓库现已纳入：公开的是匿名日级规模，源码和 Git 提交细节仍不公开。操作与只读 Secret 配置见 [私有采集说明](docs/private-collection.md)。
+私有仓库现已纳入：按用户要求显示真实仓库名与日级规模，源码和 Git 提交细节仍不公开。操作与只读 Secret 配置见 [私有采集说明](docs/private-collection.md)。
 
 下载依赖、构建产物、日志和调试输出使用统一规则排除，修改规则会重算历史。识别依据、保留边界和修改方法见 [收录与屏蔽规则](docs/content-policy.md)。
 
@@ -24,7 +24,7 @@
 
 `config.json` 发现 `SiliconYC` 名下授权可见的全部非 fork 仓库，包括私有仓库；归档仓库仍纳入，空仓库等待首次提交。GitHub Actions 每天北京时间 **09:17、21:17** 运行，也可以在 Actions 页面手动运行；GitHub 的定时触发可能延迟。推送 `dev` 会自动验证、采集并发布。
 
-页面可按全部、公开、私有范围筛选。公开仓库保留逐提交统计；私有仓库仅展示匿名的日级规模及独立更新时间。浏览器不连接 GitHub API、不持有令牌。
+页面可按全部、公开、私有范围筛选。公开仓库保留逐提交统计；私有仓库展示真实名称、日级规模及独立更新时间。浏览器不连接 GitHub API、不持有令牌。
 
 私有统计可以在本地使用现有 Git 凭证增量更新。配置 `POLY_TALLY_READ_TOKEN` 只读 Actions Secret 后，私有仓库也会自动采集；未配置时保留最近收到的脱敏私有快照，公开采集不会覆盖或伪装刷新私有数据。
 
@@ -94,7 +94,7 @@ python -m poly_tally collect --state /安全目录/poly-tally-state
 unset POLY_TALLY_TOKEN
 ```
 
-省略 `--public-only` 时，必须有可用凭证；在公开列表之外补全令牌可见的私有仓库，并按指定 `owners` 过滤。默认导出仍排除私有记录，追加 `--include-private-metrics` 才公开匿名日级规模。真实名称、路径、SHA、原始提交时间和源码不会进入私有公开数据。完整 SQLite、bare 对象缓存与备份需要放在受保护目录。
+省略 `--public-only` 时，必须有可用凭证；在公开列表之外补全令牌可见的私有仓库，并按指定 `owners` 过滤。默认导出仍排除私有记录，追加 `--include-private-metrics` 才公开仓库名称与日级规模。文件路径、SHA、原始提交时间和源码不会进入私有公开数据。完整 SQLite、bare 对象缓存与备份需要放在受保护目录。
 
 可复用本机已配置的 Git credential helper，不需要复制令牌到文件：
 
@@ -133,7 +133,7 @@ python -m poly_tally collect --public-only
 
 `retire` 保留全部历史并标为冷数据，不再抓取新提交，但仍读取可用元数据以更新名称和公开状态；`resume` 恢复发现与同步。冷数据不计入当前活动总量，可以在历史档案查看。规则变化后若保有对象会离线重算；若对象丢失则保留原规则版本，界面隔离旧口径，不伪装成统一总量。
 
-Actions cache 只用于公开计算加速，不能保证永久存在。`tally-state/checkpoint.json` 保存公开仓库的完整统计检查点；同分支的 `private-metrics.json` 只保存私有匿名日级规模，不保存私有源码、路径、blob 或 commit ID。每轮先恢复持久数据再扫描，旧缓存不能覆盖冷数据。无规模、口径或状态变化时不生成数据提交。请勿删除该数据分支。
+Actions cache 只用于公开计算加速，不能保证永久存在。`tally-state/checkpoint.json` 保存公开仓库的完整统计检查点；同分支的 `private-metrics.json` 保存私有仓库名与日级规模，不保存私有源码、路径、blob 或 commit ID。每轮先恢复持久数据再扫描，旧缓存不能覆盖冷数据。无规模、口径或状态变化时不生成数据提交。请勿删除该数据分支。
 
 ```bash
 python -m poly_tally checkpoint --public-only --checkpoint /备份目录/checkpoint.json
@@ -142,7 +142,7 @@ python -m poly_tally collect --public-only --import-checkpoint /备份目录/che
 
 默认导入只补齐缺失仓库；以检查点覆盖已有公开状态时追加 `--authoritative-checkpoint`。该选项撤下检查点已不存在的旧公开记录，但不覆盖本地已知私有状态。完整私有状态应使用 SQLite 备份；CLI 检查点始终过滤私有完整记录，私有规模通过独立脱敏文件发布。
 
-仓库转私有后停止公开 Git 详情，只按显式授权发布匿名规模，旧公开缓存不能冒充新的私有提交。此前已公开的统计可能仍在数据分支历史中；该分支不新增私有源码或私有提交详情。私有转公开按稳定键去重，不会重复加总。
+仓库转私有后停止公开 Git 详情，只按显式授权发布名称与日级规模，旧公开缓存不能冒充新的私有提交。此前已公开的统计可能仍在数据分支历史中；该分支不新增私有源码或私有提交详情。私有转公开按稳定键去重，不会重复加总。
 
 ## 历史含义与异常状态
 

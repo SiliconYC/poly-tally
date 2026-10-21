@@ -1,4 +1,4 @@
-import { METRIC_LABELS, STATUS_LABELS, aggregateHistory, selectRepositories, latestTotals, languageTotals, loadStats, publicationSummary, repositoryVisibility } from './model.mjs';
+import { METRIC_LABELS, STATUS_LABELS, aggregateHistory, selectRepositories, latestTotals, languageTotals, loadStats, publicationSummary, repositoryVisibility, sortRepositories, repositoryOptions, stockChange } from './model.mjs';
 
 const $ = id => document.getElementById(id);
 const format = number => new Intl.NumberFormat('zh-CN').format(number);
@@ -6,10 +6,10 @@ const compact = number => new Intl.NumberFormat('zh-CN', { notation: 'compact', 
 const dateFormat = new Intl.DateTimeFormat('zh-CN', { timeZone: 'UTC', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
 const shortDate = new Intl.DateTimeFormat('zh-CN', { timeZone: 'UTC', month: '2-digit', day: '2-digit' });
 const formatDate = value => Number.isFinite(Date.parse(value)) ? dateFormat.format(new Date(value)) : '尚未成功';
-const palette = ['#9de7cb', '#d9b98c', '#91b5e7', '#ada7df', '#db9d9a', '#81bfc8', '#c4cc91', '#9faab8'];
-const languageColors = { Python: '#d9b98c', JavaScript: '#c4cc91', TypeScript: '#91b5e7', Rust: '#db9d9a', Go: '#81bfc8', Markdown: '#ada7df', HTML: '#d7a780', CSS: '#99a5e7', Shell: '#9de7cb' };
+const palette = ['#2563eb', '#7c6ad8', '#0d9488', '#d89a40', '#df7280', '#5c9eca', '#7cab68', '#94a3b8'];
+const languageColors = { Python: '#4485d8', JavaScript: '#e0b34b', TypeScript: '#7e72d4', Rust: '#d58d69', Go: '#59aebc', Markdown: '#8da2ba', HTML: '#df8591', CSS: '#9a85cd', Shell: '#6aaf96' };
 let data;
-const state = { mode: 'current', ids: [], scope: 'all', language: 'all', metric: 'code', period: 'all', includeStale: false };
+const state = { mode: 'current', ids: [], scope: 'all', language: 'all', metric: 'code', period: 'all', includeStale: false, tableSort: 'name', tableDirection: 'asc', pickerSort: 'name-asc', query: '', languageSort: 'value-desc' };
 
 function element(tag, className, text) {
   const node = document.createElement(tag);
@@ -53,8 +53,7 @@ async function initialize() {
     populateFilters();
     $('load-state').hidden = true;
     $('dashboard').hidden = false;
-    const time = document.createTextNode(`数据发布于 ${formatDate(data.generatedAt)}`);
-    $('updated-at').replaceChildren(time, element('small', '', 'UTC · 私有采集时间单独列示'));
+    $('updated-at').textContent = `更新于 ${formatDate(data.generatedAt)} UTC`;
     $('rules-description').textContent = `规则 ${data.rules.version} · ${data.rules.description ?? '所有纳入仓库采用相同统计规则。'}`;
     $('footer-version').textContent = `采集器 ${data.collector?.version ?? '—'} · 规则 ${data.rules.version}`;
     render();
@@ -74,21 +73,28 @@ function renderPublication() {
   const status = { available: '可用', 'not-configured': '未配置私有采集凭据', stale: '保留旧指标，尚未刷新' }[summary.privateStatus] ?? '采集状态未知';
   $('private-updated-at').textContent = `私有指标：${status} · 最后成功 ${summary.privateUpdatedAt ? `${formatDate(summary.privateUpdatedAt)} UTC` : '尚无独立采集时间'}${source ? ` · ${source}` : ''}${summary.privateRepositories ? '' : ' · 尚无已发布私有指标'}`;
 }
-function populateFilters() {
+function renderRepositoryOptions() {
   const options = $('repository-options');
+  const focusedId = options.contains(document.activeElement) ? document.activeElement.value : null;
+  const [key, direction] = state.pickerSort.split('-');
+  const repositories = repositoryOptions(data.repositories, { query: state.query, key, direction, language: state.language, metric: state.metric });
   options.replaceChildren();
-  for (const repository of data.repositories) {
+  for (const repository of repositories) {
     const label = element('label', 'repository-option');
     const input = element('input');
     input.type = 'checkbox'; input.value = repository.id; input.checked = state.ids.includes(repository.id);
     input.addEventListener('change', () => {
-      state.ids = [...options.querySelectorAll('input:checked')].map(checkbox => checkbox.value);
+      state.ids = input.checked ? [...new Set([...state.ids, repository.id])] : state.ids.filter(id => id !== repository.id);
       render();
     });
-    label.append(input, element('span', '', repository.name), element('small', '', STATUS_LABELS[repository.status] ?? repository.status));
+    label.append(input, element('span', '', repository.name), element('small', '', key === 'metric' ? format(latestTotals([repository], state.language)[state.metric]) : repositoryVisibility(repository) === 'private' ? '私有' : '公开'));
     options.append(label);
   }
-  if (!data.repositories.length) options.append(element('p', 'inline-empty', '暂无已发布仓库'));
+  if (!repositories.length) options.append(element('p', 'inline-empty', data.repositories.length ? '没有匹配的仓库' : '暂无已发布仓库'));
+  if (focusedId) [...options.querySelectorAll('input')].find(input => input.value === focusedId)?.focus({ preventScroll: true });
+}
+function populateFilters() {
+  renderRepositoryOptions();
   const languages = [...new Set(data.repositories.flatMap(repository => repository.history.flatMap(snapshot => Object.keys(snapshot.languages))))].sort();
   $('language').replaceChildren();
   for (const [value, name] of [['all', '全部语言'], ...languages.map(name => [name, name])]) {
@@ -107,14 +113,13 @@ function render() {
   $('archive-view').setAttribute('aria-pressed', String(state.mode === 'archive'));
   $('scope-description').textContent = state.mode === 'current' ? '当前可用仓库 · 公开提交 / 私有按日规模' : '包含已退役仓库的同口径历史快照';
   $('repository-label').textContent = state.ids.length === data.repositories.length ? '全部仓库' : `已选 ${state.ids.length} 个仓库`;
-  $('stat-code').textContent = format(total.code);
-  $('stat-documentation').textContent = format(total.documentation);
-  $('stat-comment').textContent = `${format(total.comment)} 注释行 · ${format(total.blank)} 空行`;
-  $('stat-repositories').replaceChildren(document.createTextNode(format(selected.length)), element('span', '', '个'));
-  $('stat-files').textContent = `${format(total.files)} 个已统计文件`;
+  $('stat-label').textContent = '当前' + METRIC_LABELS[state.metric];
+  $('stat-total').textContent = format(total[state.metric]);
   const privateCount = selected.filter(repository => repositoryVisibility(repository) === 'private').length;
-  $('stat-repository-scope').textContent = `公开 ${format(selected.length - privateCount)} · 私有 ${format(privateCount)}`;
-  $('stat-commits').textContent = format(selected.reduce((sum, repository) => sum + repository.history.length, 0));
+  $('stat-context').textContent = format(selected.length) + ' 个仓库 · 公开 ' + format(selected.length - privateCount) + ' / 私有 ' + format(privateCount) + ' · 最新已知快照';
+  const filtered = [state.scope === 'all' ? '' : state.scope === 'private' ? '仅私有仓库' : '仅公开仓库', state.language === 'all' ? '' : state.language, state.mode === 'archive' ? '历史档案' : '', state.includeStale ? '含过期快照' : ''].filter(Boolean);
+  $('active-filters').hidden = !filtered.length;
+  $('active-filters').textContent = filtered.join(' · ');
   const messages = [];
   if (!data.repositories.length) messages.push('尚无可发布的仓库数据。首次成功采集后，这里会自动呈现默认分支历史。');
   const mismatched = scoped.filter(repository => state.ids.includes(repository.id) && repository.rulesVersion !== data.rules.version && repository.history.length);
@@ -139,19 +144,17 @@ function render() {
   renderChart(points);
   renderLanguages(selected);
   renderTable();
-  renderSpark(aggregateHistory(selected, { language: state.language, metric: 'code' }));
-}
-function renderSpark(points) {
-  const path = document.querySelector('.stat-spark path');
-  if (!points.length) { path.setAttribute('d', ''); return; }
-  const first = Date.parse(points[0].timestamp), span = Date.parse(points.at(-1).timestamp) - first || 1;
-  const max = points.reduce((maximum, point) => Math.max(maximum, point.value), 1);
-  let d = `M0 ${54 - points[0].value / max * 48}`;
-  for (const point of points.slice(1)) d += `H${((Date.parse(point.timestamp) - first) / span * 220).toFixed(1)}V${(54 - point.value / max * 48).toFixed(1)}`;
-  path.setAttribute('d', d);
+  const changeDays = state.period === 'all' ? 30 : Number(state.period);
+  const change = stockChange(selected, { since: new Date(Date.parse(until) - changeDays * 86400000).toISOString(), until, language: state.language, metric: state.metric });
+  $('change-label').textContent = '近 ' + changeDays + ' 天净变化';
+  $('stat-change').textContent = change.change === null ? '暂不可比' : (change.change > 0 ? '+' : '') + format(change.change);
+  $('stat-change').className = change.change === null ? 'unavailable' : change.change < 0 ? 'negative' : '';
+  $('change-context').textContent = !selected.length ? '先选择可用仓库' : change.missing ? change.missing + ' 个仓库缺少期初快照' : METRIC_LABELS[state.metric] + ' · 对比期初已知存量';
+  renderRepositoryOptions();
 }
 function renderLanguages(repositories) {
-  const languages = languageTotals(repositories, state.metric).filter(language => state.language === 'all' || language.name === state.language);
+  const [key, direction] = state.languageSort.split('-');
+  const languages = languageTotals(repositories, state.metric, { key, direction }).filter(language => state.language === 'all' || language.name === state.language);
   const total = languages.reduce((sum, language) => sum + language.value, 0);
   $('language-total').textContent = format(total);
   $('language-unit').textContent = `${METRIC_LABELS[state.metric]} · 最新快照`;
@@ -168,7 +171,12 @@ function renderLanguages(repositories) {
   }
 }
 function renderTable() {
-  const repositories = data.repositories.filter(repository => state.ids.includes(repository.id) && (state.scope === 'all' || repositoryVisibility(repository) === state.scope));
+  const repositories = sortRepositories(data.repositories.filter(repository => state.ids.includes(repository.id) && (state.scope === 'all' || repositoryVisibility(repository) === state.scope)), { key: state.tableSort, direction: state.tableDirection, metric: state.metric, language: state.language });
+  for (const button of document.querySelectorAll('[data-sort]')) {
+    const active = button.dataset.sort === state.tableSort;
+    button.closest('th').setAttribute('aria-sort', active ? state.tableDirection === 'asc' ? 'ascending' : 'descending' : 'none');
+    button.lastElementChild.textContent = active ? state.tableDirection === 'asc' ? '↑' : '↓' : '↕';
+  }
   const eligible = new Set(selectRepositories(data, state).map(repository => repository.id));
   $('repository-count').textContent = format(repositories.length);
   $('table-metric').textContent = METRIC_LABELS[state.metric];
@@ -185,7 +193,7 @@ function renderTable() {
     const metric = element('td', 'repo-number', repository.history.length ? format(value) : '—');
     if (!eligible.has(repository.id)) metric.append(element('small', '', '未汇总'));
     const head = element('td');
-    head.append(element('span', '', isPrivate ? '提交信息不公开' : repository.head ? repository.head.slice(0, 8) : '—'), element('span', 'repo-secondary', `${formatDate(repository.lastSuccessAt)}${repository.lastSuccessAt ? ' UTC' : ''}`));
+    head.append(element('span', '', formatDate(repository.lastSuccessAt)), element('span', 'repo-secondary', isPrivate ? 'UTC · 日级规模' : 'UTC · ' + (repository.head ? repository.head.slice(0, 8) : '尚无提交')));
     const status = element('td');
     const style = ['inaccessible', 'stale'].includes(repository.status) ? 'error-status' : ['active', 'archived'].includes(repository.status) ? '' : 'muted-status';
     status.append(badge(STATUS_LABELS[repository.status] ?? repository.status, style));
@@ -224,7 +232,7 @@ function renderChart(points) {
   const y = value => top + plotHeight - value / maximum * plotHeight;
   const svg = svgElement('svg', { viewBox: `0 0 ${width} ${height}`, role: 'img', tabindex: '0', 'aria-label': `${METRIC_LABELS[state.metric]}阶梯历史曲线。共 ${points.length} 个观察点，最新 ${format(points.at(-1).value)}。使用左右方向键查看详情，Home 和 End 跳到首尾。`, 'aria-describedby': 'chart-details' });
   const defs = svgElement('defs'), gradient = svgElement('linearGradient', { id: 'chart-fill', x1: '0', y1: '0', x2: '0', y2: '1' });
-  gradient.append(svgElement('stop', { offset: '0%', 'stop-color': '#9de7cb', 'stop-opacity': '.15' }), svgElement('stop', { offset: '100%', 'stop-color': '#9de7cb', 'stop-opacity': '0' })); defs.append(gradient); svg.append(defs);
+  gradient.append(svgElement('stop', { offset: '0%', 'stop-color': '#2563eb', 'stop-opacity': '.10' }), svgElement('stop', { offset: '100%', 'stop-color': '#2563eb', 'stop-opacity': '0' })); defs.append(gradient); svg.append(defs);
   for (let i = 0; i <= 4; i++) {
     const value = maximum * i / 4, cy = y(value);
     svg.append(svgElement('line', { x1: left, x2: width - right, y1: cy, y2: cy, class: 'chart-grid' }), svgElement('text', { x: left - 12, y: cy + 3, 'text-anchor': 'end', class: 'chart-tick' }, compact(Math.round(value))));
@@ -255,8 +263,11 @@ function renderChart(points) {
     dot.setAttribute('cx', cx); dot.setAttribute('cy', cy); dot.setAttribute('visibility', 'visible');
     tooltip.hidden = false;
     tooltip.replaceChildren(document.createTextNode(`${formatDate(point.timestamp)} UTC`), element('strong', '', `${format(point.value)} ${METRIC_LABELS[state.metric]}`));
-    tooltip.style.left = `${Math.max(5, Math.min(container.clientWidth - 170, cx / width * container.clientWidth + 12))}px`;
-    tooltip.style.top = `${Math.max(8, Math.min(container.clientHeight - 65, cy / height * container.clientHeight - 65))}px`;
+    const tooltipWidth = tooltip.offsetWidth, tooltipHeight = tooltip.offsetHeight;
+    const anchorX = cx / width * container.clientWidth;
+    const preferredX = anchorX + tooltipWidth + 16 > container.clientWidth ? anchorX - tooltipWidth - 12 : anchorX + 12;
+    tooltip.style.left = `${Math.max(5, Math.min(container.clientWidth - tooltipWidth - 5, preferredX))}px`;
+    tooltip.style.top = `${Math.max(8, Math.min(container.clientHeight - tooltipHeight - 5, cy / height * container.clientHeight - tooltipHeight - 12))}px`;
     accessible.textContent = `${formatDate(point.timestamp)} UTC，${METRIC_LABELS[state.metric]} ${format(point.value)}。`;
   }
   svg.addEventListener('pointermove', event => {
@@ -285,15 +296,24 @@ for (const [id, checked] of [['select-all', true], ['select-none', false]]) $(id
   state.ids = checked ? data.repositories.map(repository => repository.id) : []; render();
 });
 $('reset-filters').addEventListener('click', () => {
-  state.ids = data.repositories.map(repository => repository.id); state.scope = 'all'; state.language = 'all'; state.metric = 'code'; state.period = 'all'; state.includeStale = false;
+  state.ids = data.repositories.map(repository => repository.id); state.scope = 'all'; state.language = 'all'; state.metric = 'code'; state.period = 'all'; state.includeStale = false; state.mode = 'current'; state.query = ''; state.pickerSort = 'name-asc'; state.tableSort = 'name'; state.tableDirection = 'asc'; state.languageSort = 'value-desc';
+  $('repository-search').value = ''; $('repository-sort').value = 'name-asc'; $('language-sort').value = 'value-desc';
   for (const id of ['scope', 'language', 'metric', 'period']) $(id).value = state[id];
   $('include-stale').checked = false;
   for (const checkbox of $('repository-options').querySelectorAll('input')) checkbox.checked = true;
   render();
 });
+$('repository-search').addEventListener('input', event => { state.query = event.target.value; renderRepositoryOptions(); });
+$('repository-sort').addEventListener('change', event => { state.pickerSort = event.target.value; renderRepositoryOptions(); });
+$('language-sort').addEventListener('change', event => { state.languageSort = event.target.value; renderLanguages(selectRepositories(data, state)); });
+for (const button of document.querySelectorAll('[data-sort]')) button.addEventListener('click', () => {
+  state.tableDirection = state.tableSort === button.dataset.sort ? state.tableDirection === 'asc' ? 'desc' : 'asc' : ['metric', 'updated'].includes(button.dataset.sort) ? 'desc' : 'asc';
+  state.tableSort = button.dataset.sort;
+  renderTable();
+});
 $('refresh').addEventListener('click', initialize);
-document.addEventListener('click', event => { if (!$('repository-picker').contains(event.target)) $('repository-picker').open = false; });
-document.addEventListener('keydown', event => { if (event.key === 'Escape') $('repository-picker').open = false; });
+document.addEventListener('click', event => { for (const picker of document.querySelectorAll('.repository-picker, .more-filters')) if (!picker.contains(event.target)) picker.open = false; });
+document.addEventListener('keydown', event => { if (event.key === 'Escape') for (const picker of document.querySelectorAll('.repository-picker, .more-filters')) picker.open = false; });
 initialize();
 let resizeFrame;
 window.addEventListener('resize', () => {

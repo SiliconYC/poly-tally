@@ -9,6 +9,7 @@ const notice = '私有仓库：仅公开按日规模，不公开源码与提交�
 const anonymousKey = id => createHash('sha256').update(`poly-tally/repository/${id}`).digest('hex').slice(0, 16);
 const repositoryKeys = ['id', 'name', 'sourceKey', 'visibility', 'snapshotKind', 'url', 'branch', 'head', 'status', 'lastSuccessAt', 'rulesVersion', 'historyComplete', 'notice', 'skippedFiles', 'history'];
 const hexKey = value => typeof value === 'string' && /^[a-f0-9]{16}$/.test(value);
+const repositoryName = repository => repository.name === `私有仓库 · ${repository.sourceKey.slice(0, 6)}` || (typeof repository.name === 'string' && /^[A-Za-z0-9][A-Za-z0-9-]{0,38}\/[A-Za-z0-9_.-]{1,100}$/.test(repository.name) && !['.', '..'].includes(repository.name.split('/')[1]));
 const timeKey = value => value.replace(/(?:\.(\d+))?Z$/, (_match, fraction = '') => `.${fraction.padEnd(6, '0')}Z`);
 const integer = value => Number.isSafeInteger(value) && value >= 0;
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -31,7 +32,7 @@ export function validatePrivateMetrics(envelope) {
   const seen = new Set();
   for (const repository of envelope.repositories) {
     exactKeys(repository, repositoryKeys);
-    if (!hexKey(repository.sourceKey) || repository.id !== `private-${repository.sourceKey}` || repository.name !== `私有仓库 · ${repository.sourceKey.slice(0, 6)}` || seen.has(repository.sourceKey) || repository.visibility !== 'private' || repository.snapshotKind !== 'daily' || repository.url !== null || repository.branch !== null || repository.head !== null || !statuses.has(repository.status) || (repository.lastSuccessAt !== null && !iso(repository.lastSuccessAt)) || !hexKey(repository.rulesVersion) || typeof repository.historyComplete !== 'boolean' || repository.notice !== notice || !integer(repository.skippedFiles) || !Array.isArray(repository.history)) reject();
+    if (!hexKey(repository.sourceKey) || repository.id !== `private-${repository.sourceKey}` || !repositoryName(repository) || seen.has(repository.sourceKey) || repository.visibility !== 'private' || repository.snapshotKind !== 'daily' || repository.url !== null || repository.branch !== null || repository.head !== null || !statuses.has(repository.status) || (repository.lastSuccessAt !== null && !iso(repository.lastSuccessAt)) || !hexKey(repository.rulesVersion) || typeof repository.historyComplete !== 'boolean' || repository.notice !== notice || !integer(repository.skippedFiles) || !Array.isArray(repository.history)) reject();
     seen.add(repository.sourceKey);
     let previousDay = '';
     for (const snapshot of repository.history) {

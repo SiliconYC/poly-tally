@@ -15,10 +15,11 @@ from poly_tally.store import 数据库_类
 # ◕ 功能
 class 私有规模导出_类:
     """
-    把私有逐提交事实降为匿名日级规模，不导出 Git 身份、路径或提交元数据。
+    把私有逐提交事实降为日级规模，公开授权展示的仓库名，不导出文件路径或提交元数据。
 
     更新日志：
     2026.10.21 - 用户授权公开私有 LOC；完整计算状态仍只保留在受保护环境。
+    2026.10.21 - 依用户要求恢复真实仓库名，沿用稳定标识与原始采集时间。
     """
 
     公开说明 = "私有仓库：仅公开按日规模，不公开源码与提交详情。"
@@ -54,6 +55,6 @@ class 私有规模导出_类:
                 项 = 日表[日期]
                 if not 历史 or 项["metrics"] != 历史[-1]["metrics"] or 项["languages"] != 历史[-1]["languages"]:
                     历史.append(项)
-            结果.append({"id": f"private-{匿名键}", "sourceKey": 匿名键, "name": f"私有仓库 · {匿名键[:6]}", "url": None, "branch": None, "head": None, "visibility": "private", "snapshotKind": "daily", "status": 仓库["status"], "lastSuccessAt": 仓库["lastSuccessAt"], "rulesVersion": 仓库["rulesVersion"], "historyComplete": 仓库["historyComplete"], "notice": self.公开说明, "history": 历史, "skippedFiles": 仓库["skippedFiles"]})
+            结果.append({"id": f"private-{匿名键}", "sourceKey": 匿名键, "name": 仓库["name"], "url": None, "branch": None, "head": None, "visibility": "private", "snapshotKind": "daily", "status": 仓库["status"], "lastSuccessAt": 仓库["lastSuccessAt"], "rulesVersion": 仓库["rulesVersion"], "historyComplete": 仓库["historyComplete"], "notice": self.公开说明, "history": 历史, "skippedFiles": 仓库["skippedFiles"]})
         来源 = "github-actions" if os.environ.get("GITHUB_ACTIONS") == "true" else "local"
         return {"schemaVersion": 1, "generatedAt": 现在.isoformat().replace("+00:00", "Z"), "rulesVersion": self.规则.版本, "source": 来源, "collection": {"repositories": len(结果), "failed": sum(项["status"] in {"stale", "inaccessible"} for 项 in 结果)}, "repositories": 结果}
