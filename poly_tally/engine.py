@@ -32,10 +32,13 @@ class 历史引擎_类:
         arg_源路径: str,
         arg_HEAD: str | None = None,
         arg_离线: bool = False,
+        arg_对象=None,
     ) -> dict:
         仓库ID = str(arg_元数据["id"])
         旧状态 = self.数据库.api_读取仓库(仓库ID)
-        对象 = Git对象_类(self.目录 / "objects" / f"{仓库ID}.git")
+        if arg_对象 is not None and arg_离线:
+            raise ValueError("外部对象后端不能作为旧 Git 冷缓存使用")
+        对象 = arg_对象 if arg_对象 is not None else Git对象_类(self.目录 / "objects" / f"{仓库ID}.git")
         try:
             if arg_离线:
                 if 旧状态 is None or 旧状态["head"] is None:
