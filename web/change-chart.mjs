@@ -26,7 +26,7 @@ export function periodDescription(period, label) {
 }
 
 export function renderPeriodChanges({container, details, periods, label, onSelect}) {
-  container.replaceChildren(); details.replaceChildren();
+  container.replaceChildren(); details.replaceChildren(); details.title = '';
   if (!periods.length) { container.append(element('p', 'chart-empty', '当前范围没有可用历史')); return; }
   const geometry = changeGeometry(periods, Math.max(280, container.clientWidth));
   const {width, height, left, right, positive, negative, zero, stride, barWidth, bars, y} = geometry;

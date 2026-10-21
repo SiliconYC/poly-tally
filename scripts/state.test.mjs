@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {createHash} from 'node:crypto';
 import {mkdtemp, readFile, writeFile, rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
@@ -8,6 +9,7 @@ import {validatePrivateMetrics} from './metrics.mjs';
 const envelope = {schemaVersion: 1, generatedAt: '2026-10-21T04:00:00Z', rulesVersion: '0123456789abcdef', source: 'local', collection: {repositories: 0, failed: 0}, repositories: []};
 const checkpoint = {schemaVersion: 1, repositories: [{id: '1', private: false}]};
 const bytes = data => Buffer.from(JSON.stringify(data));
+const gitBlobSha = bytes => createHash('sha1').update(`blob ${bytes.length}\0`).update(bytes).digest('hex');
 function github(files = {}, {missing = false} = {}) {
   const requests = [];
   return {requests, fetcher: async (url, options) => {
@@ -19,11 +21,11 @@ function github(files = {}, {missing = false} = {}) {
       if (missing) return new Response('{}', {status: 404});
       result = {object: {sha: 'existing-commit'}};
     } else if (path === '/git/commits/existing-commit') result = {tree: {sha: 'existing-tree'}};
-    else if (path === '/git/trees/existing-tree') result = {tree: Object.keys(files).map(name => ({path: name, sha: `blob-${name}`, type: 'blob'}))};
-    else if (path.startsWith('/git/blobs/blob-')) {
-      const name = path.slice('/git/blobs/blob-'.length);
+    else if (path === '/git/trees/existing-tree') result = {tree: Object.keys(files).map(name => ({path: name, sha: gitBlobSha(bytes(files[name])), type: 'blob'}))};
+    else if (path.startsWith('/git/blobs/') && options.method === 'GET') {
+      const name = Object.keys(files).find(name => gitBlobSha(bytes(files[name])) === path.slice('/git/blobs/'.length));
       result = {content: bytes(files[name]).toString('base64'), encoding: 'base64'};
-    } else if (path === '/git/blobs' && options.method === 'POST') result = {sha: 'new-blob'};
+    } else if (path === '/git/blobs' && options.method === 'POST') result = {sha: gitBlobSha(Buffer.from(body.content, 'base64'))};
     else if (path === '/git/trees' && options.method === 'POST') result = {sha: 'new-tree'};
     else if (path === '/git/commits' && options.method === 'POST') result = {sha: 'new-commit'};
     else if (path.startsWith('/git/refs')) result = {};
@@ -165,11 +167,78 @@ test('fresh private epoch can replace legacy scope only alongside a completed cu
 
 test('deploy workflow uses the epoch restore decision to rebuild without partial/old cache state', async () => {
   const workflow = await readFile(new URL('../.github/workflows/pages.yml', import.meta.url), 'utf8');
-  assert.match(workflow, /POLY_TALLY_DATASET_EPOCH: active-default-branches-2026-10-21-v2/);
+  assert.match(workflow, /POLY_TALLY_DATASET_EPOCH: source-only-lineage-2026-10-21-v1/);
   assert.match(workflow, /id: restore-state/);
   assert.match(workflow, /RESET_REQUIRED: \$\{\{ steps\.restore-state\.outputs\.reset-required \}\}/);
   assert.match(workflow, /state="\$RUNNER_TEMP\/public-reset"/);
   assert.match(workflow, /partial=\(\)/);
   assert.doesNotMatch(workflow, /--refresh --allow-partial > "\$RUNNER_TEMP\/private-collect.log"/);
   assert.match(workflow, /tally-\$\{\{ env\.POLY_TALLY_DATASET_EPOCH \}\}/);
+});
+
+test('durable private publication rejects unproved lineage scans even if visible failures are zero', async t => {
+  const candidate = {...envelope, lineageVersion:'abcdef0123456789', completeness:{complete:false, discoveryComplete:false, expectedRepositories:0, scannedRepositories:0, missingMembers:0, failed:0}};
+  await assert.rejects(run(t, 'save-private', candidate, null, {'checkpoint.json': checkpoint}, {noPrivate:true}), /incomplete/i);
+});
+
+test('workflow and collector share the explicit lineage rebuild epoch', async () => {
+  const workflow = await readFile(new URL('../.github/workflows/pages.yml', import.meta.url), 'utf8');
+  const config = JSON.parse(await readFile(new URL('../config.json', import.meta.url), 'utf8'));
+  assert.ok(workflow.includes(`POLY_TALLY_DATASET_EPOCH: ${config.datasetEpoch}`));
+  assert.equal(config.lineageGroups[0].members.length, 3);
+});
+
+const externalProof = {complete:true,discoveryComplete:true,expectedRepositories:0,scannedRepositories:0,missingMembers:0,failed:0};
+const externalSnapshot = {...currentPrivate,lineageVersion:'abcdef0123456789',completeness:externalProof};
+async function externalSha(data) {
+  const {createHash} = await import('node:crypto');
+  const value = bytes(data);
+  return createHash('sha1').update(`blob ${value.length}\0`).update(value).digest('hex');
+}
+test('explicit external SHA restores exact new-epoch snapshot before public reset finishes', async t => {
+  const sha = await externalSha(externalSnapshot);
+  const result = await run(t,'restore',checkpoint,envelope,{'checkpoint.json':checkpoint,'private-metrics.json':externalSnapshot},{env:{...epochEnv,POLY_TALLY_EXTERNAL_PRIVATE_BLOB_SHA:sha}});
+  assert.equal(result.outcome.resetRequired,true);
+  assert.equal(result.outcome.privatePending,false);
+  assert.deepEqual(JSON.parse(await readFile(result.privateFilename)),externalSnapshot);
+  await assert.rejects(readFile(result.filename),{code:'ENOENT'});
+});
+
+test('external restore hard-rejects wrong SHA, missing blob, old epoch and unproved inventory', async t => {
+  const sha = await externalSha(externalSnapshot);
+  const options = {env:{...epochEnv,POLY_TALLY_EXTERNAL_PRIVATE_BLOB_SHA:sha}};
+  await assert.rejects(run(t,'restore',checkpoint,envelope,{'checkpoint.json':checkpoint,'private-metrics.json':{...externalSnapshot,generatedAt:'2026-10-21T05:00:00Z'}},options), /blob|external/i);
+  await assert.rejects(run(t,'restore',checkpoint,envelope,{'checkpoint.json':checkpoint},options), /missing|external/i);
+  await assert.rejects(run(t,'restore',checkpoint,envelope,{}, {...options,missing:true}), /missing|external/i);
+  for (const candidate of [{...externalSnapshot,datasetEpoch:'old-epoch'},envelope,{...externalSnapshot,completeness:{...externalProof,complete:false}}]) {
+    await assert.rejects(run(t,'restore',checkpoint,envelope,{'private-metrics.json':candidate},{env:{...epochEnv,POLY_TALLY_EXTERNAL_PRIVATE_BLOB_SHA:await externalSha(candidate)}}), /epoch|incomplete|lineage/i);
+  }
+});
+
+test('external publication is an explicit dispatch SHA choice, never an automatic secret fallback', async () => {
+  const workflow = await readFile(new URL('../.github/workflows/pages.yml',import.meta.url),'utf8');
+  assert.match(workflow,/workflow_dispatch:\s+inputs:\s+external_private_blob_sha:/);
+  assert.match(workflow,/POLY_TALLY_EXTERNAL_PRIVATE_BLOB_SHA: \$\{\{ github.event_name == 'workflow_dispatch' && inputs.external_private_blob_sha \|\| '' \}\}/);
+  assert.match(workflow,/if \[ -n "\$POLY_TALLY_EXTERNAL_PRIVATE_BLOB_SHA" \]/);
+});
+
+test('external dispatch selection is scoped to restore/build, not inherited by unrelated fixture tests', async () => {
+  const workflow = await readFile(new URL('../.github/workflows/pages.yml',import.meta.url),'utf8');
+  assert.doesNotMatch(workflow.split('\njobs:')[0], /POLY_TALLY_EXTERNAL_PRIVATE_BLOB_SHA/);
+  const restore = workflow.split('id: restore-state')[1].split('- name:')[0];
+  const build = workflow.split('- name: Build dashboard')[1].split('- name:')[0];
+  for (const step of [restore,build]) assert.match(step,/POLY_TALLY_EXTERNAL_PRIVATE_BLOB_SHA: \$\{\{ github.event_name == 'workflow_dispatch' && inputs.external_private_blob_sha \|\| '' \}\}/);
+});
+
+test('save-private returns the actual durable SHA for new, unchanged and scan-only snapshots', async t => {
+  const changed = {...envelope,archivedRepositoryKeys:['abcdef0123456789']};
+  const newlyWritten = await run(t,'save-private',changed,null,{'private-metrics.json':envelope},{noPrivate:true});
+  assert.equal(newlyWritten.outcome?.privateBlobSha,gitBlobSha(bytes(changed)));
+  const identical = await run(t,'save-private',envelope,null,{'private-metrics.json':envelope},{noPrivate:true});
+  assert.equal(identical.outcome?.privateBlobSha,gitBlobSha(bytes(envelope)));
+  const scanOnly = {...envelope,generatedAt:'2026-10-21T05:00:00Z'};
+  const retained = await run(t,'save-private',scanOnly,null,{'private-metrics.json':envelope},{noPrivate:true});
+  assert.equal(retained.outcome?.privateBlobSha,gitBlobSha(bytes(envelope)));
+  assert.notEqual(retained.outcome?.privateBlobSha,gitBlobSha(bytes(scanOnly)),'never attest to bytes skipped by semantic deduplication');
+  assert.equal(retained.requests.filter(request => request.method !== 'GET').length,0);
 });

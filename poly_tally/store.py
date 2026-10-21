@@ -14,6 +14,7 @@ class 数据库_类:
     """
 
     def __init__(self, arg_目录: Path) -> None:
+        self.目录 = arg_目录
         arg_目录.mkdir(parents=True, exist_ok=True)
         self.连接 = sqlite3.connect(arg_目录 / "stats.sqlite")
         self.连接.execute("PRAGMA journal_mode=WAL")
@@ -21,7 +22,23 @@ class 数据库_类:
             CREATE TABLE IF NOT EXISTS repositories(id TEXT PRIMARY KEY, state TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS blobs(oid TEXT, context TEXT, version TEXT, metrics TEXT, PRIMARY KEY(oid,context,version));
             CREATE TABLE IF NOT EXISTS runs(id INTEGER PRIMARY KEY, data TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS metadata(key TEXT PRIMARY KEY, value TEXT NOT NULL);
         """)
+
+    def api_绑定批次(self, epoch: str, contract: str) -> None:
+        if not epoch:
+            raise ValueError("lineage replay requires a new explicit dataset epoch")
+        row = self.连接.execute("SELECT value FROM metadata WHERE key='epochContract'").fetchone()
+        expected = json.dumps({'epoch': epoch, 'contract': contract}, sort_keys=True)
+        if row is None:
+            occupied = any(self.连接.execute(f"SELECT 1 FROM {table} LIMIT 1").fetchone() for table in ('repositories', 'blobs', 'runs'))
+            objects = self.目录 / "objects"
+            if occupied or (objects.exists() and any(objects.iterdir())):
+                raise ValueError("old state/cache cannot initialize a new lineage epoch")
+            with self.连接:
+                self.连接.execute("INSERT INTO metadata VALUES('epochContract', ?)", (expected,))
+        elif row[0] != expected:
+            raise ValueError("lineage configuration or rules changed; use a new dataset epoch")
 
     def api_仓库列表(self) -> list[dict]:
         return [json.loads(行[0]) for 行 in self.连接.execute("SELECT state FROM repositories ORDER BY id")]

@@ -99,11 +99,11 @@ test('load rejects unavailable, malformed or unsupported data and accepts valid 
 });
 
 test('repository sorting handles names, selected metric, dates and unavailable values without mutating source', () => {
-  const repositories = [repo('b', [snapshot(day(1), 20, 'Python', 3)], { lastSuccessAt: null }), repo('a', [snapshot(day(1), 5, 'Python', 9)], { lastSuccessAt: day(2) }), repo('c', [], { lastSuccessAt: day(1) })];
+  const repositories = [repo('b', [snapshot(day(1), 20, 'Python', 3)], { lastSuccessAt: null }), repo('a', [snapshot(day(2), 5, 'Python', 9)], { lastSuccessAt: day(2) }), repo('c', [], { lastSuccessAt: day(1) })];
   assert.deepEqual(model.sortRepositories?.(repositories, { key: 'name' }).map(r => r.id), ['a', 'b', 'c']);
   assert.deepEqual(model.sortRepositories?.(repositories, { key: 'metric', direction: 'desc', metric: 'documentation' }).map(r => r.id), ['a', 'b', 'c']);
-  assert.deepEqual(model.sortRepositories?.(repositories, { key: 'updated', direction: 'asc' }).map(r => r.id), ['c', 'a', 'b']);
-  assert.deepEqual(model.sortRepositories?.(repositories, { key: 'updated', direction: 'desc' }).map(r => r.id), ['a', 'c', 'b']);
+  assert.deepEqual(model.sortRepositories?.(repositories, { key: 'updated', direction: 'asc' }).map(r => r.id), ['b', 'a', 'c']);
+  assert.deepEqual(model.sortRepositories?.(repositories, { key: 'updated', direction: 'desc' }).map(r => r.id), ['a', 'b', 'c']);
   assert.deepEqual(repositories.map(r => r.id), ['b', 'a', 'c']);
 });
 
@@ -215,4 +215,30 @@ test('explicit retained private baseline counts by default without hiding behind
   assert.equal(latestTotals(selectRepositories(data)).code, 40);
   assert.deepEqual(selectRepositories(data, {scope: 'private'}).map(r => r.id), [retained.id]);
   assert.equal(selectRepositories(data, {includeStale: true, mode: 'archive'}).some(r => r.id === 'archived'), false);
+});
+
+
+test('updated sorting uses actual commits rather than scan time and preserves unknowns last', () => {
+  const older = repo('older', [snapshot(day(1), 10)], {lastSuccessAt: day(21)});
+  const newer = repo('newer', [snapshot(day(3), 10)], {lastSuccessAt: day(4)});
+  const clamped = repo('clamped', [{...snapshot(day(20), 10), committedAt: day(2)}]);
+  const daily = privateRepo(30, {lastCommitDate: '2026-10-05'});
+  const empty = repo('empty', [], {lastSuccessAt: day(21)});
+  assert.equal(model.repositoryUpdatedAt?.(clamped), day(2));
+  assert.equal(model.repositoryUpdatedAt?.(daily), '2026-10-05');
+  assert.equal(model.repositoryUpdatedAt?.(empty), null);
+  assert.deepEqual(model.sortRepositories([older, newer, clamped, daily, empty], {key: 'updated', direction: 'desc'}).map(r => r.id), [daily.id, 'newer', 'clamped', 'older', 'empty']);
+});
+
+test('repository shares use one selected dominant-group stock and selected metric/language', () => {
+  const group = repo('lineage:family', [snapshot(day(1), 12, 'Python', 3)], {name: 'owner/current', lineage: {members: ['one', 'two']}});
+  const other = repo('other', [snapshot(day(1), 4, 'Rust', 9)]);
+  const zero = repo('zero', [snapshot(day(1), 0, 'Python', 0)]);
+  assert.deepEqual(model.repositoryShares?.([other, group, zero]), [
+    {id: group.id, name: 'current', value: 12, share: .75, percentage: 75},
+    {id: 'other', name: 'other', value: 4, share: .25, percentage: 25},
+  ]);
+  assert.deepEqual(model.repositoryShares?.([other, group], {metric: 'documentation', language: 'Python'}), [{id: group.id, name: 'current', value: 3, share: 1, percentage: 100}]);
+  assert.deepEqual(model.repositoryShares?.([zero]), []);
+  assert.deepEqual(model.repositoryShares?.([]), []);
 });

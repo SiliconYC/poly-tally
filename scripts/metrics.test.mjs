@@ -293,19 +293,236 @@ test('verified archive keys exclude a stale public visibility record as well as 
   assert.equal(result.summary.code, 0);
 });
 
-test('checked-in audited baseline restores exactly sixteen unarchived private records by default', async () => {
-  const {selectRepositories, latestTotals} = await import('../web/model.mjs');
-  const baseline = JSON.parse(await readFile(new URL('../web/data/retained-private-baseline.json', import.meta.url), 'utf8'));
-  assert.equal(metricsModule.validateRetainedPrivateBaseline(baseline), true);
-  assert.equal(baseline.metrics.repositories.length, 16);
-  assert.equal(baseline.scope.archivedRepositoryKeys.length, 5);
-  assert.equal(baseline.metrics.generatedAt, '2026-10-21T05:18:28.364564Z');
-  assert.equal(baseline.sourceEpoch, null);
-  assert.equal(baseline.scope.archivedRepositoryKeys.includes(keyFor('1157826711')), true, 'GitHub-confirmed archived --x222-');
-  const result = mergePrivateMetrics({...publicStats([]), datasetEpoch: baseline.targetEpoch}, baseline.metrics, {retainedBaseline: baseline});
-  const rows = selectRepositories(result);
-  assert.equal(rows.length, 16);
-  assert.equal(result.summary.code, latestTotals(rows).code);
-  assert.equal(rows.some(r => baseline.scope.archivedRepositoryKeys.includes(r.sourceKey)), false);
-  assert.equal(rows.every(r => r.dataFreshness === 'retained-private' && r.rulesVersion === baseline.metrics.rulesVersion), true);
+test('source-only reset ships no old private fallback or retained statistics', async () => {
+  const config = JSON.parse(await readFile(new URL('../config.json', import.meta.url), 'utf8'));
+  const data = JSON.parse(await readFile(new URL('../web/data/stats.json', import.meta.url), 'utf8'));
+  assert.equal(data.datasetEpoch, config.datasetEpoch);
+  assert.equal(data.datasetEpoch, 'source-only-lineage-2026-10-21-v1');
+  assert.deepEqual(data.repositories, []);
+  assert.equal(data.summary.code, 0);
+  assert.equal(data.summary.files, 0);
+  assert.equal(data.completeness.complete, false);
+  assert.equal(data.publication.privateStatus, 'pending-rebuild');
+  for (const filename of ['private-metrics.json', 'retained-private-baseline.json']) {
+    await assert.rejects(readFile(new URL(`../web/data/${filename}`, import.meta.url)), {code:'ENOENT'});
+  }
+});
+
+const lineageVersion = 'abcdef0123456789';
+function lineageRepository(overrides = {}) {
+  return privateRepository('lineage:vitro', {name: 'owner/current', lastCommitDate: '2026-10-20', lineage: {
+    id: 'vitro', version: lineageVersion,
+    members: [{name: 'owner/old', sourceKey: keyFor('101')}, {name: 'owner/current', sourceKey: keyFor('202')}],
+    dominantMember: 'owner/old', representativeMember: 'owner/current',
+  }, ...overrides});
+}
+function lineageEnvelope(repositories = [lineageRepository()], overrides = {}) {
+  return {...envelope(repositories), datasetEpoch: 'lineage-v1', lineageVersion,
+    completeness: {complete: true, discoveryComplete: true, expectedRepositories: 2, scannedRepositories: 2, missingMembers: 0, failed: 0}, ...overrides};
+}
+const lineagePublicStats = repositories => ({...publicStats(repositories), datasetEpoch: 'lineage-v1', lineageVersion});
+
+test('accepts only sanitized lineage identities and day-only actual update dates', () => {
+  assert.equal(validatePrivateMetrics(lineageEnvelope()), true);
+  assert.equal(validatePrivateMetrics(envelope([privateRepository('101', {lastCommitDate: null})])), true);
+  for (const mutate of [
+    d => d.repositories[0].lastCommitDate = '2026-10-20T12:34:56Z',
+    d => d.repositories[0].lastCommitDate = '2026-02-30',
+    d => d.repositories[0].lineage.path = 'private/source.py',
+    d => d.repositories[0].lineage.members[0].sha = 'private-commit',
+    d => d.repositories[0].lineage.members[0].name = 'owner/repo/file',
+    d => d.repositories[0].lineage.members[0].sourceKey = 'secret',
+    d => d.repositories[0].lineage.members[1] = {...d.repositories[0].lineage.members[0]},
+    d => d.repositories[0].lineage.dominantMember = 'owner/not-a-member',
+    d => d.repositories[0].lineage.representativeMember = 'owner/old',
+    d => d.repositories[0].lineage.id = '../unsafe',
+    d => d.repositories[0].lineage.version = '0000000000000000',
+    d => d.repositories[0].sourceKey = keyFor('different'),
+  ]) {
+    const data = lineageEnvelope(); mutate(data);
+    assert.throws(() => validatePrivateMetrics(data));
+  }
+});
+
+test('lineage envelope rejects duplicate group/member statistics and falsified completeness', () => {
+  const duplicated = lineageEnvelope([lineageRepository(), privateRepository('101')]);
+  assert.throws(() => validatePrivateMetrics(duplicated));
+  for (const mutate of [
+    d => d.completeness.discoveryComplete = false,
+    d => d.completeness.expectedRepositories = 3,
+    d => d.completeness.missingMembers = 1,
+    d => d.completeness.failed = 1,
+    d => d.completeness.extra = 'private-detail',
+    d => d.repositories[0].historyComplete = false,
+    d => d.repositories[0].rulesVersion = '0000000000000000',
+    d => d.repositories[0].status = 'excluded',
+  ]) {
+    const data = lineageEnvelope(); mutate(data);
+    assert.throws(() => validatePrivateMetrics(data));
+  }
+});
+
+test('a private mixed group replaces raw public members and the public partial group exactly once', () => {
+  const publicGroup = publicRepository('lineage:vitro', {lineage: structuredClone(lineageRepository().lineage)});
+  const data = lineagePublicStats([publicRepository('101'), publicRepository('202'), publicGroup, publicRepository('303')]);
+  const result = mergePrivateMetrics(data, lineageEnvelope(), {privateStatus:'available'});
+  assert.deepEqual(result.repositories.map(r => r.id), ['303', `private-${keyFor('lineage:vitro')}`]);
+  assert.equal(result.summary.code, 30);
+  assert.equal(result.summary.repositories, 2);
+  assert.equal(result.publication.privateStatus, 'available');
+});
+
+test('lineage versions must match across sources and old retained data cannot masquerade as a fresh group', () => {
+  const next = lineageEnvelope();
+  assert.throws(() => mergePrivateMetrics(publicStats([]), next), /lineage/i);
+  assert.throws(() => mergePrivateMetrics({...lineagePublicStats([]), lineageVersion: '0000000000000000'}, next), /lineage/i);
+  assert.throws(() => mergePrivateMetrics(lineagePublicStats([]), {...envelope(), datasetEpoch: 'lineage-v1'}), /lineage/i);
+  const old = envelope();
+  const baseline = {...retainedBaseline(old), targetEpoch: 'lineage-v1'};
+  assert.throws(() => mergePrivateMetrics(lineagePublicStats([]), old, {retainedBaseline: baseline}), /lineage/i);
+});
+
+test('incomplete lineage may be inspected but cannot be adopted or labeled available', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'tally-lineage-incomplete-'));
+  t.after(() => rm(directory, {recursive: true, force: true}));
+  const baseline = join(directory, 'baseline.json'), candidate = join(directory, 'candidate.json'), publicFile = join(directory, 'public.json');
+  const original = JSON.stringify(lineageEnvelope());
+  await writeFile(baseline, original);
+  await writeFile(publicFile, JSON.stringify(lineagePublicStats([])));
+  for (const incomplete of [lineageEnvelope([], {completeness: {complete: false, discoveryComplete: false, expectedRepositories: 2, scannedRepositories: 0, missingMembers: 2, failed: 0}}), (() => {const d = lineageEnvelope(); delete d.completeness; return d;})()]) {
+    assert.equal(validatePrivateMetrics(incomplete), true);
+    assert.equal(mergePrivateMetrics(lineagePublicStats([]), incomplete).publication.privateStatus, 'stale');
+    await writeFile(candidate, JSON.stringify(incomplete));
+    await assert.rejects(metricsModule.adoptPrivateMetrics(baseline, candidate, publicFile), /incomplete/i);
+    assert.equal(await readFile(baseline, 'utf8'), original);
+    assert.throws(() => metricsModule.validatePrivateMetricsReplacement(lineageEnvelope(), incomplete, lineagePublicStats([])), /incomplete/i);
+  }
+});
+
+test('scope preservation recognizes private group members but not genuinely missing identities', () => {
+  const previous = {...envelope([privateRepository('101'), privateRepository('202')]), datasetEpoch: 'legacy-v0'};
+  assert.equal(metricsModule.validatePrivateMetricsReplacement(previous, lineageEnvelope(), lineagePublicStats([]), {resetEpoch: 'lineage-v1', preserveScope: true}), true);
+  const missing = {...envelope([privateRepository('101'), privateRepository('202'), privateRepository('303')]), datasetEpoch: 'legacy-v0'};
+  assert.throws(() => metricsModule.validatePrivateMetricsReplacement(missing, lineageEnvelope(), lineagePublicStats([]), {resetEpoch: 'lineage-v1', preserveScope: true}), /scope/);
+});
+
+test('validate --complete rejects missing lineage proof and accepts fully fresh proof', async t => {
+  const {spawnSync} = await import('node:child_process');
+  const directory = await mkdtemp(join(tmpdir(), 'tally-lineage-cli-'));
+  t.after(() => rm(directory, {recursive: true, force: true}));
+  const candidate = join(directory, 'candidate.json');
+  const data = lineageEnvelope();
+  await writeFile(candidate, JSON.stringify(data));
+  const run = () => spawnSync(process.execPath, [new URL('./metrics.mjs', import.meta.url).pathname, 'validate', candidate, '--complete'], {encoding:'utf8'});
+  assert.equal(run().status, 0);
+  delete data.completeness;
+  await writeFile(candidate, JSON.stringify(data));
+  assert.equal(run().status, 1);
+});
+
+test('sanitized lineage accepts a deliberate singleton and matches collector safe-id syntax', () => {
+  const singleton = lineageEnvelope();
+  singleton.repositories[0].lineage.members = [singleton.repositories[0].lineage.members[1]];
+  singleton.repositories[0].lineage.dominantMember = 'owner/current';
+  assert.equal(validatePrivateMetrics(singleton), true);
+  for (const id of ['with.dot', 'a'.repeat(65)]) {
+    const invalid = lineageEnvelope();
+    invalid.repositories[0].lineage.id = id;
+    invalid.repositories[0].sourceKey = keyFor(`lineage:${id}`);
+    invalid.repositories[0].id = `private-${invalid.repositories[0].sourceKey}`;
+    assert.throws(() => validatePrivateMetrics(invalid));
+  }
+});
+
+test('overall lineage completeness requires both jobs and retains their independent proofs', () => {
+  const privateData = lineageEnvelope();
+  const data = {...lineagePublicStats([]), completeness: {complete: true, discoveryComplete: true, expectedRepositories: 3, scannedRepositories: 3, missingMembers: 0, failed: 0}};
+  const result = mergePrivateMetrics(data, privateData, {privateStatus:'available'});
+  assert.deepEqual(result.publication.publicCompleteness, data.completeness);
+  assert.deepEqual(result.publication.privateCompleteness, privateData.completeness);
+  assert.deepEqual(result.completeness, {complete: true, discoveryComplete: true, expectedRepositories: 5, scannedRepositories: 5, missingMembers: 0, failed: 0});
+  result.publication.privateCompleteness.complete = false;
+  assert.equal(privateData.completeness.complete, true, 'proofs must be copied, not referenced');
+  const pending = mergePrivateMetrics({...data, completeness: {...data.completeness, complete: false, discoveryComplete: false, scannedRepositories: 1, missingMembers: 1, failed: 1}}, privateData, {privateStatus:'available'});
+  assert.equal(pending.publication.privateStatus, 'available', 'private job status is independent');
+  assert.deepEqual(pending.completeness, {complete: false, discoveryComplete: false, expectedRepositories: 5, scannedRepositories: 3, missingMembers: 1, failed: 1});
+  const unproven = mergePrivateMetrics(lineagePublicStats([]), privateData);
+  assert.equal(unproven.completeness.complete, false);
+  assert.equal(unproven.publication.publicCompleteness, null);
+});
+
+test('a contradictory public completeness claim cannot make a new lineage dataset fresh', () => {
+  const data = {...lineagePublicStats([]), completeness: {complete: true, discoveryComplete: true, expectedRepositories: 3, scannedRepositories: 2, missingMembers: 0, failed: 0}};
+  assert.throws(() => mergePrivateMetrics(data, lineageEnvelope()), /Invalid/);
+});
+
+test('current private attempt failure cannot reuse a retained snapshot proof as current completeness', () => {
+  const privateData = lineageEnvelope();
+  const publicData = {...lineagePublicStats([]), completeness:{complete:true, discoveryComplete:true, expectedRepositories:3, scannedRepositories:3, missingMembers:0, failed:0}};
+  for (const privateStatus of ['stale', 'not-configured']) {
+    const result = mergePrivateMetrics(publicData, privateData, {privateStatus});
+    assert.equal(result.publication.privateStatus, 'stale');
+    assert.equal(result.publication.privateAttemptStatus, privateStatus);
+    assert.equal(result.publication.privateCompleteness, null, 'no proof for the unsuccessful current attempt');
+    assert.deepEqual(result.publication.privateSnapshotCompleteness, privateData.completeness, 'prior complete proof retained only as snapshot provenance');
+    assert.equal(result.completeness.complete, false);
+    assert.equal(result.completeness.discoveryComplete, false);
+    assert.equal(result.publication.privateUpdatedAt, privateData.generatedAt);
+    assert.deepEqual(privateData.completeness, lineageEnvelope().completeness);
+  }
+  const fresh = mergePrivateMetrics(publicData, privateData, {privateStatus:'available'});
+  assert.equal(fresh.completeness.complete, true);
+  assert.equal(fresh.publication.privateCompleteness.complete, true);
+});
+
+const blobSha = value => {
+  const bytes = Buffer.isBuffer(value) ? value : Buffer.from(value);
+  return createHash('sha1').update(`blob ${bytes.length}\0`).update(bytes).digest('hex');
+};
+test('explicit external snapshot proves only exact sanitized bytes under current contracts', () => {
+  const privateData = lineageEnvelope();
+  const publicData = {...lineagePublicStats([]), completeness:{complete:true, discoveryComplete:true, expectedRepositories:0, scannedRepositories:0, missingMembers:0, failed:0}};
+  const privateBytes = Buffer.from(JSON.stringify(privateData, null, 2) + '\n');
+  const externalPrivateBlobSha = blobSha(privateBytes);
+  const result = mergePrivateMetrics(publicData, privateData, {privateStatus:'not-configured', externalPrivateBlobSha, privateBytes});
+  assert.equal(result.publication.privateAttemptStatus, 'external-verified');
+  assert.equal(result.publication.privateStatus, 'available');
+  assert.equal(result.publication.privateSnapshotBlobSha, externalPrivateBlobSha);
+  assert.equal(result.completeness.complete, true);
+  assert.deepEqual(result.publication.privateCompleteness, privateData.completeness);
+  assert.equal(mergePrivateMetrics({...publicData, completeness:{...publicData.completeness,complete:false}}, privateData, {privateStatus:'stale', externalPrivateBlobSha, privateBytes}).completeness.complete, false);
+  for (const mutation of [
+    options => options.externalPrivateBlobSha = 'f'.repeat(40),
+    options => options.externalPrivateBlobSha = 'not-a-sha',
+    options => options.privateBytes = Buffer.from(JSON.stringify(privateData)),
+    options => delete options.privateBytes,
+  ]) {
+    const options = {privateStatus:'not-configured', externalPrivateBlobSha, privateBytes}; mutation(options);
+    assert.throws(() => mergePrivateMetrics(publicData, privateData, options), /external|blob|snapshot/i);
+  }
+  assert.throws(() => mergePrivateMetrics(publicData, privateData, {privateStatus:'external-verified'}), /status|external/i);
+  for (const mutate of [
+    data => data.datasetEpoch = 'old-epoch',
+    data => data.lineageVersion = '0000000000000000',
+    data => data.rules.version = '0000000000000000',
+    data => delete data.datasetEpoch,
+    data => delete data.lineageVersion,
+  ]) {
+    const data = structuredClone(publicData); mutate(data);
+    assert.throws(() => mergePrivateMetrics(data, privateData, {externalPrivateBlobSha, privateBytes}), /epoch|lineage|rules/i);
+  }
+  const incomplete = lineageEnvelope([], {completeness:{complete:false,discoveryComplete:false,expectedRepositories:2,scannedRepositories:0,missingMembers:2,failed:0}});
+  const incompleteBytes = Buffer.from(JSON.stringify(incomplete));
+  assert.throws(() => mergePrivateMetrics(publicData, incomplete, {externalPrivateBlobSha:blobSha(incompleteBytes),privateBytes:incompleteBytes}), /incomplete/i);
+});
+
+test('lineage snapshot without a current-attempt signal is not automatically fresh', () => {
+  const privateData = lineageEnvelope();
+  const publicData = {...lineagePublicStats([]), completeness:{complete:true,discoveryComplete:true,expectedRepositories:0,scannedRepositories:0,missingMembers:0,failed:0}};
+  const result = mergePrivateMetrics(publicData, privateData);
+  assert.equal(result.publication.privateAttemptStatus, 'not-configured');
+  assert.equal(result.publication.privateStatus, 'stale');
+  assert.equal(result.publication.privateCompleteness, null);
+  assert.deepEqual(result.publication.privateSnapshotCompleteness, privateData.completeness);
+  assert.equal(result.completeness.complete, false);
 });

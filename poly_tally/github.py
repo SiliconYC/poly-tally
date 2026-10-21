@@ -59,16 +59,26 @@ class GitHub发现器_类:
         if 默认分支 is None:
             if arg_仓库["size"] > 0:
                 raise RuntimeError(f"GitHub 非空仓库缺失默认分支：{arg_仓库['full_name']}")
-            return None
+            if self._确认空仓库(arg_仓库):
+                return None
+            raise RuntimeError("默认分支缺失但未确认空仓库")
         地址 = f"{self._仓库地址(arg_仓库['full_name'])}/branches/{quote(默认分支, safe='')}"
         try:
             响应 = self._请求(地址)
         except requests.HTTPError as 异常:
-            # GitHub 用 404 同时表示权限不足和资源缺失，只有已知空仓库才允许空结果。
+            # Metadata (including size=0) is not proof of Contents permission.
+            # Only a successful unfiltered branch-list read can confirm no refs.
             if arg_仓库["size"] == 0 and 异常.response is not None and 异常.response.status_code in (404, 409):
-                return None
+                if self._确认空仓库(arg_仓库):
+                    return None
             raise
         return 响应.json()["commit"]["sha"]
+
+    def _确认空仓库(self, arg_仓库: dict) -> bool:
+        # List branches requires Contents:read for private repositories. A 404,
+        # 409, malformed body or filtered/nonempty page never establishes empty.
+        响应 = self._请求(f"{self._仓库地址(arg_仓库['full_name'])}/branches?per_page=1")
+        return 响应.status_code == 200 and 响应.json() == [] and "next" not in 响应.links
 
     @staticmethod
     def _仓库地址(arg_全名: str) -> str:

@@ -53,6 +53,18 @@ class 规则_类:
         if arg_配置["max_blob_bytes"] <= 0:
             raise ValueError("max_blob_bytes 必须大于零")
         self.语言表 = {**self.默认语言, **arg_配置["languages"]}
+        # Explicit hard exclusions apply before all include/preserve rules and
+        # before blob reads. Canonical type and remapped type both participate,
+        # so remapping .json/.svg to source code cannot revive a banned family.
+        扩展排除 = arg_配置.get("exclude_extensions", [])
+        语言排除 = arg_配置.get("exclude_languages", [])
+        if not isinstance(扩展排除, list) or any(not isinstance(项, str) or not 项.startswith(".") or len(项) < 2 or any(符 in 项 for 符 in "/\\*?[]") for 项 in 扩展排除):
+            raise ValueError("exclude_extensions 必须是以点开头的扩展名列表")
+        已知语言 = {项.casefold() for 项 in self.词法名}
+        if not isinstance(语言排除, list) or any(not isinstance(项, str) or 项.casefold() not in 已知语言 for 项 in 语言排除):
+            raise ValueError("exclude_languages 必须是已知语言类别列表")
+        self.硬排除扩展 = {项.casefold() for 项 in 扩展排除}
+        self.硬排除语言 = {项.casefold() for 项 in 语言排除}
         for 语言 in self.语言表.values():
             if 语言 not in self.词法名:
                 raise ValueError(f"未知语言类别：{语言}")
@@ -64,6 +76,11 @@ class 规则_类:
         return fnmatch.fnmatchcase(arg_路径, arg_模式) or (arg_模式.startswith("**/") and 规则_类.api_匹配(arg_路径, arg_模式[3:]))
 
     def api_语言(self, arg_路径: str) -> str | None:
+        路径 = PurePosixPath(arg_路径)
+        扩展 = 路径.suffix.casefold()
+        类别 = (self.默认语言.get(扩展), self.语言表.get(扩展))
+        if 扩展 in self.硬排除扩展 or any(语言 is not None and 语言.casefold() in self.硬排除语言 for 语言 in 类别):
+            return None
         if any(self.api_匹配(arg_路径, 项) for 项 in self.配置["exclude"]):
             return None
         产物规则 = self.配置["artifact_exclude"] if "artifact_exclude" in self.配置 else []

@@ -105,3 +105,37 @@ test('top-level filter controls share explicit geometry and form two aligned col
   assert.match(narrow, /\.filters>label \.select-control,\.filters>label select\{width:100%\}/);
   assert.doesNotMatch(narrow, /\.filters select,\.filters summary\{[^}]*padding:/);
 });
+
+test('the two balanced analysis cards expose independent change metric/period and composition controls', () => {
+  const insights = html.slice(html.indexOf('class="insights-grid"'), html.indexOf('<section class="panel repositories-panel"'));
+  assert.equal([...insights.matchAll(/<section\b/g)].length, 2);
+  assert.match(insights, /<select id="change-metric">[\s\S]*value="code"[\s\S]*value="comment"[\s\S]*value="documentation"[\s\S]*value="files"/);
+  assert.match(insights, /<select id="change-period">[\s\S]*value="day"[\s\S]*value="week"[\s\S]*value="month"/);
+  assert.match(insights, /id="composition-language"[^>]*aria-pressed="true"/);
+  assert.match(insights, /id="composition-repository"[^>]*aria-pressed="false"/);
+  assert.match(css, /\.insight-controls select,\.language-toolbar select\{[^}]*height:38px;[^}]*line-height:20px;[^}]*padding:0 36px 0 12px/);
+  assert.match(css, /\.language-toolbar \.control-chevron\{[^}]*width:16px;[^}]*height:16px/);
+});
+
+test('application chrome is nonselectable but editing, native keyboard controls and live status remain available', () => {
+  assert.match(css, /body\{[^}]*cursor:default;[^}]*user-select:none;[^}]*caret-color:transparent/);
+  assert.match(css, /input,textarea,\[contenteditable="true"\]\{[^}]*user-select:text;[^}]*cursor:text;[^}]*caret-color:auto/);
+  assert.match(html, /id="copy-toast"[^>]*role="status"[^>]*aria-live="polite"[^>]*aria-atomic="true"/);
+  assert.doesNotMatch(app, /(?:selectstart|mousedown)[\s\S]{0,100}preventDefault/);
+  const keyboard = app.match(/document\.addEventListener\('keydown'[^\n]+/)?.[0];
+  assert.match(keyboard, /event\.key === 'Escape'/);
+  assert.doesNotMatch(keyboard, /preventDefault/);
+});
+
+test('new lineage datasets cannot lose the incomplete-rebuild warning or call an incomplete run complete', () => {
+  assert.match(app, /Boolean\(data\.lineageVersion\) && data\.completeness\?\.complete !== true/);
+  assert.match(app, /if \(incompleteRebuild\) messages\.push\('全量重算未完成/);
+  assert.match(app, /privateStatus === 'pending-rebuild' && !incompleteRebuild/);
+  assert.match(app, /run\.completeness\?\.complete === false/);
+  assert.match(app, /incomplete \? '采集未完整' : '采集完成'/);
+});
+
+test('folded groups identify themselves without pretending their null branch is missing data', () => {
+  assert.match(app, /repository\.lineage \? '私有 · 同源组'/);
+  assert.match(app, /repository\.lineage \? '公开 · 同源组'/);
+});
