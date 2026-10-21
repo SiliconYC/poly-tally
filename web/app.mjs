@@ -1,3 +1,4 @@
+import {renderLanguageChart} from './language-chart.mjs';
 import {renderStackedChart} from './stacked-chart.mjs';
 import {repositoryColors} from './chart-utils.mjs';
 import { METRIC_LABELS, STATUS_LABELS, aggregateHistory, selectRepositories, latestTotals, languageTotals, loadStats, publicationSummary, repositoryVisibility, repositoryDisplayName, sortRepositories, repositoryOptions, stockChange } from './model.mjs';
@@ -161,17 +162,10 @@ function renderLanguages(repositories) {
   const total = languages.reduce((sum, language) => sum + language.value, 0);
   $('language-total').textContent = format(total);
   $('language-unit').textContent = `${METRIC_LABELS[state.metric]} · 最新快照`;
-  $('language-bar').replaceChildren();
-  $('language-list').replaceChildren();
-  if (!languages.length) $('language-list').append(element('p', 'inline-empty', '当前筛选下暂无语言数据。'));
-  for (const [index, language] of languages.entries()) {
-    const color = languageColors[language.name] ?? palette[index % palette.length];
-    const bar = element('span'); bar.style.backgroundColor = color; bar.style.width = `${language.value / total * 100}%`; $('language-bar').append(bar);
-    const row = element('div', 'language-row');
-    const dot = element('span', 'language-dot'); dot.style.backgroundColor = color;
-    row.append(dot, element('span', 'language-name', language.name), element('span', 'language-count', format(language.value)), element('span', 'language-percent', `${(language.value / total * 100).toFixed(1)}%`));
-    $('language-list').append(row);
-  }
+  $('language-reset').hidden = state.language === 'all';
+  renderLanguageChart({container: $('language-chart'), list: $('language-list'), languages, label: METRIC_LABELS[state.metric], onSelect: name => {
+    state.language = name; $('language').value = name; render();
+  }});
 }
 function renderTable() {
   const repositories = sortRepositories(selectRepositories(data, state), { key: state.tableSort, direction: state.tableDirection, metric: state.metric, language: state.language });
@@ -229,6 +223,7 @@ $('reset-filters').addEventListener('click', () => {
 });
 $('repository-search').addEventListener('input', event => { state.query = event.target.value; renderRepositoryOptions(); });
 $('repository-sort').addEventListener('change', event => { state.pickerSort = event.target.value; renderRepositoryOptions(); });
+$('language-reset').addEventListener('click', () => { state.language = 'all'; $('language').value = 'all'; render(); });
 $('language-sort').addEventListener('change', event => { state.languageSort = event.target.value; renderLanguages(selectRepositories(data, state)); });
 for (const button of document.querySelectorAll('[data-sort]')) button.addEventListener('click', () => {
   state.tableDirection = state.tableSort === button.dataset.sort ? state.tableDirection === 'asc' ? 'desc' : 'asc' : button.dataset.sort !== 'name' ? 'desc' : 'asc';

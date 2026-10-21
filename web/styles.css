@@ -48,3 +48,19 @@
 .repositories-panel .table-note{max-width:65%;text-align:right;line-height:1.7}
 @media(min-width:1400px){.chart-container{height:440px}}
 @media(max-width:760px){.chart-container{height:310px}.chart-instructions{font-size:10px}.chart-navigator{margin-left:42px;margin-right:16px}.navigator-hint{display:none}.snapshot-list{grid-template-columns:1fr}.snapshot-details summary>span{float:none;display:block;margin:6px 0 0 14px}.chart-mode button{padding:4px 10px}.series-legend{gap:4px}.series-toggle{font-size:10px;padding:5px}.repositories-panel .table-note{font-size:9px}.navigator-controls{gap:8px}.navigator-controls input{max-width:118px}table{min-width:840px}}
+
+.language-layout{display:grid;grid-template-columns:320px minmax(0,1fr);align-items:center;gap:32px;margin-top:14px}
+.language-chart{width:100%;max-width:320px;margin:auto;aspect-ratio:1;position:relative}
+.language-chart svg{width:100%;height:100%;display:block;overflow:visible}
+.language-visual>p{text-align:center;font-size:11px;color:var(--muted);margin-top:-6px}
+.language-visual>.text-button{display:block;margin:9px auto 0;font-size:11px}
+.pie-sector{cursor:pointer;transition:opacity .12s;outline-offset:4px}.pie-sector:focus-visible{outline:none;stroke:#1d4ed8;stroke-width:3}
+.pie-center-label{fill:#64748b;font-size:12px;font-family:inherit}.pie-center-value{fill:var(--ink);font-size:28px;font-weight:600;letter-spacing:-1px;font-family:inherit}.pie-center-share{fill:#64748b;font-size:11px;font-family:inherit}
+.language-list{display:block;max-height:325px;overflow-y:auto;padding-right:6px}
+.language-row{width:100%;position:relative;isolation:isolate;border-bottom:1px solid #f0f3f8;padding:12px 6px;text-align:left;gap:10px;border-radius:5px}
+.language-row:hover,.language-row.highlighted{background:#f4f7fc}
+.language-row .language-share{position:absolute;left:0;bottom:0;height:2px;opacity:.4;z-index:-1;min-width:2px}
+.language-percent{min-width:48px;font-size:11px}.language-count{font-size:12px}
+.language-toolbar{margin-bottom:5px;padding:0 6px 8px;border-bottom:1px solid var(--line)}
+.pie-empty{display:flex;align-items:center;justify-content:center;height:100%;color:var(--muted);border:28px solid #f1f4f8;border-radius:50%;font-size:12px}
+@media(max-width:760px){.language-layout{grid-template-columns:1fr;gap:24px;margin-top:0}.language-chart{max-width:260px}.language-list{max-height:310px}.language-row{font-size:12px}.language-visual>p{font-size:10px}.language-total{max-width:60%}}
