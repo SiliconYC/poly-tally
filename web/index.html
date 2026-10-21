@@ -28,6 +28,11 @@
       <div id="warnings" class="warning" role="status" hidden></div>
       <section class="panel timeline-panel" aria-labelledby="timeline-title">
         <div class="overview"><div class="headline-stat"><span id="stat-label">当前代码行</span><strong id="stat-total">0</strong><p id="stat-context">最新已知快照</p></div><div class="change-stat"><span id="change-label">近 30 天净变化</span><strong id="stat-change">—</strong><p id="change-context"></p></div></div>
+        <div class="chart-heading"><h2 id="timeline-title">代码行存量趋势</h2><div class="chart-mode" role="group" aria-label="趋势图显示方式"><button id="chart-absolute" aria-pressed="true">规模</button><button id="chart-percent" aria-pressed="false">占比</button></div></div>
+        <p class="chart-instructions">按仓库分层 · 悬停查看，点击固定 · 方向键浏览快照</p>
+        <div id="chart" class="chart-container"></div>
+        <div id="chart-navigator" class="chart-navigator"></div>
+        <div class="chart-bottom"><span>各仓库快照之间保持存量 · 首次观测前未知</span><span id="chart-range">UTC</span></div>
       <section class="metrics-grid" aria-label="最新快照分类概览">
         <button class="metric-card" data-card="total" aria-pressed="false"><span>总行数</span><strong class="metric-value">0</strong><small class="metric-context"></small></button>
         <button class="metric-card" data-card="code" aria-pressed="true"><span>代码行</span><strong class="metric-value">0</strong><small class="metric-context"></small></button>
@@ -36,11 +41,6 @@
         <button class="metric-card" data-card="blank" aria-pressed="false"><span>空行</span><strong class="metric-value">0</strong><small class="metric-context"></small></button>
         <button class="metric-card" data-card="files" aria-pressed="false"><span>文件数</span><strong class="metric-value">0</strong><small class="metric-context"></small></button>
       </section>
-        <div class="chart-heading"><h2 id="timeline-title">代码行存量趋势</h2><div class="chart-mode" role="group" aria-label="趋势图显示方式"><button id="chart-absolute" aria-pressed="true">规模</button><button id="chart-percent" aria-pressed="false">占比</button></div></div>
-        <p class="chart-instructions">按仓库分层 · 悬停查看，点击固定 · 方向键浏览快照</p>
-        <div id="chart" class="chart-container"></div>
-        <div id="chart-navigator" class="chart-navigator"></div>
-        <div class="chart-bottom"><span>各仓库快照之间保持存量 · 首次观测前未知</span><span id="chart-range">UTC</span></div>
         <details class="legend-details"><summary>仓库图层 <span>展开控制显隐 · Shift 点击独看</span></summary><div id="chart-legend" class="series-legend" aria-label="仓库图层（仅影响趋势图）"></div></details>
         <details class="snapshot-details"><summary>快照明细 <span>悬停图表更新 · 点击图表固定 · 方向键浏览</span></summary><div id="chart-details"></div></details>
       </section>
