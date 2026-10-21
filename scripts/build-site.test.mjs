@@ -54,3 +54,37 @@ test('private collection failure marks the retained durable snapshot stale witho
   assert.equal(result.publication.privateUpdatedAt, envelope.generatedAt);
   assert.deepEqual(JSON.parse(await readFile(join(root, 'web/data/private-metrics.json'))), envelope);
 });
+
+test('content-versioned filenames cover CSS, entry and nested ESM imports consistently', async t => {
+  const root = await fixture(t);
+  await mkdir(join(root, 'web/charts'));
+  const index = '<link href="./styles.css" rel="stylesheet"><script type="module" src="./app.mjs"></script>';
+  await writeFile(join(root, 'web/index.html'), index);
+  await writeFile(join(root, 'web/styles.css'), ':root{--bg:#f5f5f0}');
+  await writeFile(join(root, 'web/app.mjs'), `import {plot} from './charts/plot.mjs'; import('./model.mjs'); fetch('./data/stats.json');`);
+  await writeFile(join(root, 'web/charts/plot.mjs'), `export {model as plot} from '../model.mjs';`);
+  await writeFile(join(root, 'web/model.mjs'), 'export const model = 1;');
+  const {buildSite} = await import('./build-site.mjs');
+  const build = () => buildSite({root, logger: {log() {}}});
+  await build();
+  const html = await readFile(join(root, 'site/index.html'), 'utf8');
+  const version = html.match(/styles\.([a-f0-9]{16})\.css/)[1];
+  assert.ok(html.includes(`./app.${version}.mjs`));
+  const entry = await readFile(join(root, `site/app.${version}.mjs`), 'utf8');
+  assert.ok(entry.includes(`./charts/plot.${version}.mjs`));
+  assert.ok(entry.includes(`import('./model.${version}.mjs')`));
+  assert.ok(entry.includes(`fetch('./data/stats.json')`));
+  assert.ok((await readFile(join(root, `site/charts/plot.${version}.mjs`), 'utf8')).includes(`../model.${version}.mjs`));
+  await assert.rejects(access(join(root, 'site/styles.css')));
+  await assert.rejects(access(join(root, 'site/app.mjs')));
+  assert.equal(await readFile(join(root, 'web/index.html'), 'utf8'), index, 'source HTML remains usable in local dev');
+  assert.deepEqual(JSON.parse(await readFile(join(root, 'site/data/stats.json'))), publicStats);
+  await build();
+  assert.equal(await readFile(join(root, 'site/index.html'), 'utf8'), html, 'identical assets yield identical URLs');
+  await writeFile(join(root, 'web/styles.css'), ':root{--bg:#ffffff}');
+  await build();
+  const next = await readFile(join(root, 'site/index.html'), 'utf8');
+  assert.notEqual(next, html, 'CSS-only changes invalidate the entire module and style release');
+  assert.ok(!next.includes(version));
+  await assert.rejects(access(join(root, `site/app.${version}.mjs`)), 'old build artifacts do not leak into the release');
+});
