@@ -1,7 +1,9 @@
 import {stackedHistory} from './model.mjs';
-import {element, svgElement, colorDot, format, compact, dayLabel, dateLabel} from './chart-utils.mjs';
+import {element, svgElement, colorDot, format, compact, maximumStock, dayLabel, dateLabel} from './chart-utils.mjs';
 
 export function renderStackedChart({container, navigator, legend, details, rangeLabel, repositories, colors, metric, label, language, since, until, view, onRangeChange}) {
+  const restoreLegendFocus = legend.contains(document.activeElement);
+  const focusedRepository = restoreLegendFocus ? document.activeElement.dataset.repositoryId : null;
   const visible = repositories.filter(repository => !view.hidden.has(repository.id));
   const full = stackedHistory(visible, {metric, language, since, until});
   const first = full.points[0]?.timestamp, last = full.points.at(-1)?.timestamp;
@@ -14,6 +16,7 @@ export function renderStackedChart({container, navigator, legend, details, range
   rangeLabel.textContent = points.length ? `${dayLabel(points[0].timestamp)} — ${dayLabel(points.at(-1).timestamp)} · UTC` : 'UTC';
   for (const repository of repositories) {
     const button = element('button', 'series-toggle', repository.name.includes('/') ? repository.name.split('/').slice(1).join('/') : repository.name);
+    button.dataset.repositoryId = repository.id;
     button.prepend(colorDot(colors.get(repository.id)));
     button.setAttribute('aria-pressed', String(!view.hidden.has(repository.id)));
     button.title = '点击显示或隐藏此仓库；Shift 点击只看此仓库（只影响趋势图）';
@@ -28,6 +31,10 @@ export function renderStackedChart({container, navigator, legend, details, range
     const restore = element('button', 'text-button', '全部显示');
     restore.addEventListener('click', () => { view.hidden.clear(); rerender(); }); legend.append(restore);
   }
+  if (restoreLegendFocus) {
+    const buttons = [...legend.querySelectorAll('button')];
+    (buttons.find(button => button.dataset.repositoryId === focusedRepository) ?? buttons[0])?.focus({preventScroll: true});
+  }
   if (!points.length) {
     const empty = element('div', 'chart-empty');
     empty.append(element('strong', '', !visible.length && repositories.length ? '所有仓库图层均已隐藏' : '这个范围还没有可用快照'), element('span', '', '选择仓库或点击图例恢复图层，调整筛选后查看趋势。'));
@@ -37,7 +44,7 @@ export function renderStackedChart({container, navigator, legend, details, range
   const left = width < 480 ? 42 : 58, right = 16, top = 24, bottom = 32;
   const min = Date.parse(points[0].timestamp), max = Date.parse(points.at(-1).timestamp), span = max - min || 86400000;
   const plotWidth = width - left - right, plotHeight = height - top - bottom;
-  const maximum = view.percent ? 100 : niceMaximum(Math.max(...points.map(p => p.value), 1));
+  const maximum = view.percent ? 100 : niceMaximum(maximumStock(points));
   const x = timestamp => left + (Date.parse(timestamp) - min) / span * plotWidth;
   const y = value => height - bottom - value / maximum * plotHeight;
   const svg = svgElement('svg', {viewBox: `0 0 ${width} ${height}`, tabindex: 0, role: 'img', 'aria-label': `${label}按仓库堆叠面积图。${series.length} 个仓库。左右方向键查看快照，Home、End 跳到首尾，Escape 返回最新。`, 'aria-describedby': 'snapshot-heading'});
@@ -139,7 +146,7 @@ function renderNavigator({navigator, points, range, onChange}) {
   if (!span) return;
   const box = element('div', 'navigator-plot');
   const svg = svgElement('svg', {viewBox: '0 0 1000 52', preserveAspectRatio: 'none', 'aria-hidden': 'true'});
-  const maximum = Math.max(...points.map(p => p.value), 1);
+  const maximum = maximumStock(points);
   let d = `M0,52V${50 - points[0].value / maximum * 44}`;
   for (const point of points.slice(1)) d += `H${(Date.parse(point.timestamp) - min) / span * 1000}V${50 - point.value / maximum * 44}`;
   d += 'V52H0Z'; svg.append(svgElement('path', {d, fill: '#bacbe7'})); box.append(svg);

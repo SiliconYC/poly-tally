@@ -1,5 +1,6 @@
 export const format = number => new Intl.NumberFormat('zh-CN').format(number);
 export const compact = number => new Intl.NumberFormat('zh-CN', {notation: 'compact', maximumFractionDigits: 1}).format(number);
+export const maximumStock = points => points.reduce((maximum, point) => Math.max(maximum, point.value), 1);
 export const dayLabel = timestamp => new Date(timestamp).toISOString().slice(0, 10);
 export const dateLabel = timestamp => new Intl.DateTimeFormat('zh-CN', {timeZone: 'UTC', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false}).format(new Date(timestamp));
 export function element(tag, className, text) {
