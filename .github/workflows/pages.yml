@@ -16,7 +16,8 @@ permissions:
   contents: read
 
 # Bump only for an explicitly requested full baseline rebuild. No prior epoch
-# checkpoint/cache/private snapshot may enter the new dataset.
+# checkpoint/cache may enter the new computation. An explicitly audited retained
+# private baseline may remain visible, labeled with its original epoch and time.
 env:
   POLY_TALLY_DATASET_EPOCH: active-default-branches-2026-10-21-v2
 
@@ -37,7 +38,7 @@ jobs:
             echo 'configured=true' >> "$GITHUB_OUTPUT"
           else
             echo 'configured=false' >> "$GITHUB_OUTPUT"
-            echo 'No private source token; a missing current-epoch snapshot remains pending rebuild.'
+            echo 'No private source token; use the audited retained private baseline if available, without claiming a rebuild.'
           fi
       - uses: actions/checkout@v4
         if: steps.credential.outputs.configured == 'true'
@@ -75,7 +76,7 @@ jobs:
           else
             echo 'available=false' >> "$GITHUB_OUTPUT"
             echo 'status=stale' >> "$GITHUB_OUTPUT"
-            echo '::warning::Private collection incomplete; only an existing same-epoch snapshot may be retained.'
+            echo '::warning::Private collection incomplete; retain a current-epoch snapshot or the explicit audited private baseline.'
           fi
       # 私有 Git 对象、SQLite、检查点和诊断日志不能进入 cache 或 artifact。
       - name: Stage only the sanitized private snapshot
@@ -165,7 +166,7 @@ jobs:
             echo 'status=stale' >> "$GITHUB_OUTPUT"
             echo '::warning::Private snapshot rejected; retain the previous sanitized snapshot.'
           fi
-      - name: Build dashboard with fresh or same-epoch metrics; missing private rebuild stays pending
+      - name: Build dashboard with fresh private metrics or the audited retained baseline
         env:
           PRIVATE_JOB_RESULT: ${{ needs.private.result }}
           PRIVATE_SCAN_STATUS: ${{ needs.private.outputs.status }}

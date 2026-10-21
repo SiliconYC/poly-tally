@@ -105,3 +105,48 @@ test('public rebuild explicitly remains pending while private fresh data is unav
   assert.equal(result.publication.privateUpdatedAt, null);
   assert.equal(result.publication.privateRepositories, 0);
 });
+
+test('explicit retained baseline restores default private totals and fresh same-epoch collection supersedes it', async t => {
+  const {createHash} = await import('node:crypto');
+  const {selectRepositories, latestTotals} = await import('../web/model.mjs');
+  const {buildSite} = await import('./build-site.mjs');
+  const sourceKey = '0123456789abcdef';
+  const row = {id: `private-${sourceKey}`, sourceKey, name: `私有仓库 · ${sourceKey.slice(0, 6)}`, visibility: 'private', snapshotKind: 'daily', url: null, branch: null, head: null,
+    status: 'active', lastSuccessAt: envelope.generatedAt, rulesVersion: envelope.rulesVersion, historyComplete: true, notice: '私有仓库：仅公开按日规模，不公开源码与提交详情。', skippedFiles: 0,
+    history: [{timestamp: envelope.generatedAt, metrics: {code: 10, comment: 0, blank: 0, documentation: 0, files: 1}, languages: {}}]};
+  const old = {...envelope, collection: {repositories: 1, failed: 0}, repositories: [row]};
+  const baseline = {mode: 'retained-private-baseline', targetEpoch: 'reset-test-v2', sourceEpoch: null, sourceSnapshotSha256: 'a'.repeat(64), sourceStateCommit: 'b'.repeat(40),
+    retainedSnapshotSha256: createHash('sha256').update(JSON.stringify(old)).digest('hex'),
+    scope: {source: 'github-connector/list_repositories', verifiedAt: '2026-10-21T06:00:00Z', activeRepositoryKeys: [sourceKey], archivedRepositoryKeys: []}, metrics: old};
+  const root = await fixture(t);
+  await writeFile(join(root, 'web/data/stats.json'), JSON.stringify({...publicStats, datasetEpoch: baseline.targetEpoch, rules: {version: 'fedcba9876543210'}}));
+  const retainedPath = join(root, 'web/data/retained-private-baseline.json');
+  await writeFile(retainedPath, JSON.stringify(baseline));
+  const retained = await buildSite({root, privateStatus: 'stale', logger: {log() {}}});
+  assert.equal(retained.publication.privateStatus, 'retained');
+  assert.equal(retained.publication.privateUpdatedAt, old.generatedAt);
+  assert.equal(latestTotals(selectRepositories(retained)).code, 10);
+  await assert.rejects(access(join(root, 'site/data/retained-private-baseline.json')));
+  const fresh = structuredClone(old);
+  fresh.datasetEpoch = baseline.targetEpoch;
+  fresh.rulesVersion = 'fedcba9876543210';
+  fresh.repositories[0].rulesVersion = fresh.rulesVersion;
+  fresh.generatedAt = '2026-10-21T07:00:00Z';
+  fresh.repositories[0].lastSuccessAt = fresh.generatedAt;
+  fresh.repositories[0].history[0].timestamp = fresh.generatedAt;
+  fresh.repositories[0].history[0].metrics.code = 20;
+  await writeFile(join(root, 'web/data/private-metrics.json'), JSON.stringify(fresh));
+  const rebuilt = await buildSite({root, logger: {log() {}}});
+  assert.equal(rebuilt.publication.privateStatus, 'available');
+  assert.equal(rebuilt.publication.privateUpdatedAt, fresh.generatedAt);
+  assert.equal(latestTotals(selectRepositories(rebuilt)).code, 20);
+  assert.equal(rebuilt.repositories[0].dataFreshness, undefined);
+  const shrunk = {...fresh, collection: {repositories: 0, failed: 0}, repositories: []};
+  await writeFile(join(root, 'web/data/private-metrics.json'), JSON.stringify(shrunk));
+  await assert.rejects(buildSite({root, logger: {log() {}}}), /scope/);
+  await rm(join(root, 'web/data/private-metrics.json'));
+  await writeFile(join(root, 'web/data/stats.json'), JSON.stringify({...publicStats, datasetEpoch: 'later-reset-v3'}));
+  const laterReset = await buildSite({root, logger: {log() {}}});
+  assert.equal(laterReset.publication.privateStatus, 'pending-rebuild');
+  assert.equal(laterReset.publication.privateRepositories, 0, 'explicit v2 retention cannot silently cross into a later reset');
+});

@@ -57,15 +57,41 @@ export function validatePrivateMetrics(envelope) {
   return true;
 }
 
-export function mergePrivateMetrics(publicStats, envelope) {
+// This is an explicit transition, never an epoch relabel or a fresh collection.
+// The checked-in scope contains only hashed identities verified via GitHub metadata.
+export function validateRetainedPrivateBaseline(baseline, targetEpoch) {
+  exactKeys(baseline, ['mode', 'targetEpoch', 'sourceEpoch', 'sourceSnapshotSha256', 'sourceStateCommit', 'retainedSnapshotSha256', 'scope', 'metrics']);
+  validatePrivateMetrics(baseline.metrics);
+  exactKeys(baseline.scope, ['source', 'verifiedAt', 'activeRepositoryKeys', 'archivedRepositoryKeys']);
+  const {metrics, scope} = baseline;
+  const keys = values => Array.isArray(values) && values.every(hexKey) && new Set(values).size === values.length;
+  if (baseline.mode !== 'retained-private-baseline' || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/.test(baseline.targetEpoch)
+    || (targetEpoch !== undefined && targetEpoch !== baseline.targetEpoch)
+    || baseline.sourceEpoch !== (metrics.datasetEpoch ?? null) || baseline.sourceEpoch === baseline.targetEpoch
+    || !/^[a-f0-9]{64}$/.test(baseline.sourceSnapshotSha256) || !/^[a-f0-9]{40}$/.test(baseline.sourceStateCommit)
+    || baseline.retainedSnapshotSha256 !== createHash('sha256').update(JSON.stringify(metrics)).digest('hex')
+    || scope.source !== 'github-connector/list_repositories' || !iso(scope.verifiedAt) || timeKey(scope.verifiedAt) < timeKey(metrics.generatedAt)
+    || !keys(scope.activeRepositoryKeys) || !keys(scope.archivedRepositoryKeys)
+    || scope.activeRepositoryKeys.some(key => scope.archivedRepositoryKeys.includes(key))
+    || metrics.collection.failed !== 0 || metrics.repositories.length !== scope.activeRepositoryKeys.length
+    || metrics.repositories.some(repository => !scope.activeRepositoryKeys.includes(repository.sourceKey) || !['active', 'empty'].includes(repository.status))) reject();
+  return true;
+}
+
+export function mergePrivateMetrics(publicStats, envelope, {retainedBaseline} = {}) {
   validatePrivateMetrics(envelope);
   if (publicStats?.schemaVersion !== 1 || !Array.isArray(publicStats.repositories) || typeof publicStats.rules?.version !== 'string') throw new Error('Invalid public dataset');
-  if (publicStats.datasetEpoch !== envelope.datasetEpoch) throw new Error('Dataset epoch mismatch; old private metrics cannot enter the rebuilt dataset.');
+  if (retainedBaseline) {
+    validateRetainedPrivateBaseline(retainedBaseline, publicStats.datasetEpoch);
+    if (!publicStats.datasetEpoch || JSON.stringify(envelope) !== JSON.stringify(retainedBaseline.metrics)) reject();
+  } else if (publicStats.datasetEpoch !== envelope.datasetEpoch) throw new Error('Dataset epoch mismatch; old private metrics cannot enter the rebuilt dataset.');
   const data = structuredClone(publicStats);
   const privateData = structuredClone(envelope);
   if (!Number.isFinite(Date.parse(data.generatedAt)) || Date.parse(envelope.generatedAt) > Date.parse(data.generatedAt)) data.generatedAt = envelope.generatedAt;
-  const current = repository => repository.status === 'active' && repository.rulesVersion === data.rules.version;
-  const publicRepositories = data.repositories.filter(repository => repository.status !== 'archived' && repository.visibility !== 'private' && !repository.id.startsWith('private-'));
+  if (retainedBaseline) for (const repository of privateData.repositories) repository.dataFreshness = 'retained-private';
+  const current = repository => repository.status === 'active' && (repository.rulesVersion === data.rules.version || (repository.visibility === 'private' && repository.dataFreshness === 'retained-private'));
+  const archivedKeys = new Set([...(envelope.archivedRepositoryKeys ?? []), ...(retainedBaseline?.scope.archivedRepositoryKeys ?? [])]);
+  const publicRepositories = data.repositories.filter(repository => repository.status !== 'archived' && !archivedKeys.has(anonymousKey(repository.id)) && repository.visibility !== 'private' && !repository.id.startsWith('private-'));
   const publicKeys = new Set(publicRepositories.filter(current).map(repository => anonymousKey(repository.id)));
   const privateRepositories = privateData.repositories.filter(repository => repository.status !== 'archived' && !publicKeys.has(repository.sourceKey));
   const privateKeys = new Set(privateRepositories.map(repository => repository.sourceKey));
@@ -80,16 +106,22 @@ export function mergePrivateMetrics(publicStats, envelope) {
   const snapshots = counted.reduce((sum, repository) => sum + repository.history.length, 0);
   data.summary = {...total, repositories: counted.length, publicRepositories: counted.length - privateCount, privateRepositories: privateCount, commits: snapshots, snapshots};
   data.publication = {privateRepositories: privateRepositories.length, privateUpdatedAt: envelope.generatedAt, privateSource: envelope.source, privateStatus: envelope.collection.failed > 0 || privateRepositories.some(repository => repository.rulesVersion !== data.rules.version || ['stale', 'inaccessible'].includes(repository.status)) ? 'stale' : 'available'};
+  if (retainedBaseline) Object.assign(data.publication, {
+    privateStatus: 'retained', privateDatasetEpoch: retainedBaseline.sourceEpoch,
+    privateRulesVersion: envelope.rulesVersion, privateScopeVerifiedAt: retainedBaseline.scope.verifiedAt,
+    privateProvenance: {mode: retainedBaseline.mode, sourceStateCommit: retainedBaseline.sourceStateCommit,
+      sourceSnapshotSha256: retainedBaseline.sourceSnapshotSha256, retainedSnapshotSha256: retainedBaseline.retainedSnapshotSha256},
+  });
   return data;
 }
 
-export function validatePrivateMetricsReplacement(previous, next, publicStats, {resetEpoch} = {}) {
+export function validatePrivateMetricsReplacement(previous, next, publicStats, {resetEpoch, preserveScope = false} = {}) {
   validatePrivateMetrics(previous);
   validatePrivateMetrics(next);
   if (next.collection.failed > 0) throw new Error('Private collection incomplete; retaining durable sanitized metrics');
   if (previous.datasetEpoch !== next.datasetEpoch) {
-    if (resetEpoch && resetEpoch === next.datasetEpoch) return true;
-    throw new Error('Dataset epoch mismatch; explicit reset required.');
+    if (!resetEpoch || resetEpoch !== next.datasetEpoch) throw new Error('Dataset epoch mismatch; explicit reset required.');
+    if (!preserveScope) return true;
   }
   if (timeKey(next.generatedAt) < timeKey(previous.generatedAt)) throw new Error('Private snapshot is older than durable metrics; retaining previous sanitized metrics.');
   const nextByKey = new Map(next.repositories.map(repository => [repository.sourceKey, repository]));

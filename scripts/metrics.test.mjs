@@ -237,3 +237,75 @@ test('dataset epochs cannot mix and scope reset requires explicit replacement au
   assert.throws(() => metricsModule.validatePrivateMetricsReplacement(previous, next), /epoch/i);
   assert.equal(metricsModule.validatePrivateMetricsReplacement(previous, next, undefined, {resetEpoch: 'reset-test-v2'}), true);
 });
+
+function retainedBaseline(data = envelope()) {
+  return {mode: 'retained-private-baseline', targetEpoch: 'reset-test-v2', sourceEpoch: data.datasetEpoch ?? null,
+    sourceSnapshotSha256: 'a'.repeat(64), sourceStateCommit: 'b'.repeat(40),
+    retainedSnapshotSha256: createHash('sha256').update(JSON.stringify(data)).digest('hex'),
+    scope: {source: 'github-connector/list_repositories', verifiedAt: '2026-10-21T06:00:00Z',
+      activeRepositoryKeys: data.repositories.map(r => r.sourceKey), archivedRepositoryKeys: [keyFor('999')]}, metrics: data};
+}
+
+test('explicit verified retained mode counts active old private data without relabeling epoch, rules or times', () => {
+  const data = {...publicStats([publicRepository()]), datasetEpoch: 'reset-test-v2', rules: {version: 'fedcba9876543210'}};
+  data.repositories[0].rulesVersion = data.rules.version;
+  const old = envelope();
+  const baseline = retainedBaseline(old);
+  assert.throws(() => mergePrivateMetrics(data, old), /epoch/i);
+  const result = mergePrivateMetrics(data, old, {retainedBaseline: baseline});
+  assert.equal(result.datasetEpoch, 'reset-test-v2');
+  assert.equal(result.summary.code, 30);
+  assert.equal(result.summary.privateRepositories, 1);
+  assert.equal(result.publication.privateStatus, 'retained');
+  assert.equal(result.publication.privateUpdatedAt, old.generatedAt);
+  assert.equal(result.publication.privateDatasetEpoch, null);
+  assert.equal(result.publication.privateRulesVersion, version);
+  const privateRow = result.repositories.find(r => r.visibility === 'private');
+  assert.equal(privateRow.dataFreshness, 'retained-private');
+  assert.equal(privateRow.rulesVersion, version);
+  assert.equal(privateRow.lastSuccessAt, old.repositories[0].lastSuccessAt);
+  assert.deepEqual(privateRow.history, old.repositories[0].history);
+  assert.equal(old.repositories[0].dataFreshness, undefined);
+});
+
+test('retained mode rejects unverified scope, archived keys, changed snapshots and wrong targets', () => {
+  const data = {...publicStats([]), datasetEpoch: 'reset-test-v2'};
+  for (const mutate of [b => b.scope.activeRepositoryKeys = [], b => b.scope.archivedRepositoryKeys.push(keyFor('101')),
+    b => b.metrics.repositories[0].history[0].metrics.code++, b => b.targetEpoch = 'another',
+    b => b.sourceEpoch = 'reset-test-v2', b => b.scope.verifiedAt = '2026-10-20T00:00:00Z']) {
+    const baseline = retainedBaseline(); mutate(baseline);
+    assert.throws(() => mergePrivateMetrics(data, baseline.metrics, {retainedBaseline: baseline}));
+  }
+});
+
+test('fresh replacement of retained data must preserve verified private scope across epochs', () => {
+  const old = envelope();
+  const next = {...envelope([]), datasetEpoch: 'reset-test-v2'};
+  assert.throws(() => metricsModule.validatePrivateMetricsReplacement(old, next, publicStats([]), {resetEpoch: 'reset-test-v2', preserveScope: true}), /scope/);
+  next.archivedRepositoryKeys = [keyFor('101')];
+  assert.equal(metricsModule.validatePrivateMetricsReplacement(old, next, publicStats([]), {resetEpoch: 'reset-test-v2', preserveScope: true}), true);
+});
+
+test('verified archive keys exclude a stale public visibility record as well as private records', () => {
+  const privateData = {...envelope([]), archivedRepositoryKeys: [keyFor('202')]};
+  const result = mergePrivateMetrics(publicStats([publicRepository('202')]), privateData);
+  assert.deepEqual(result.repositories, []);
+  assert.equal(result.summary.code, 0);
+});
+
+test('checked-in audited baseline restores exactly sixteen unarchived private records by default', async () => {
+  const {selectRepositories, latestTotals} = await import('../web/model.mjs');
+  const baseline = JSON.parse(await readFile(new URL('../web/data/retained-private-baseline.json', import.meta.url), 'utf8'));
+  assert.equal(metricsModule.validateRetainedPrivateBaseline(baseline), true);
+  assert.equal(baseline.metrics.repositories.length, 16);
+  assert.equal(baseline.scope.archivedRepositoryKeys.length, 5);
+  assert.equal(baseline.metrics.generatedAt, '2026-10-21T05:18:28.364564Z');
+  assert.equal(baseline.sourceEpoch, null);
+  assert.equal(baseline.scope.archivedRepositoryKeys.includes(keyFor('1157826711')), true, 'GitHub-confirmed archived --x222-');
+  const result = mergePrivateMetrics({...publicStats([]), datasetEpoch: baseline.targetEpoch}, baseline.metrics, {retainedBaseline: baseline});
+  const rows = selectRepositories(result);
+  assert.equal(rows.length, 16);
+  assert.equal(result.summary.code, latestTotals(rows).code);
+  assert.equal(rows.some(r => baseline.scope.archivedRepositoryKeys.includes(r.sourceKey)), false);
+  assert.equal(rows.every(r => r.dataFreshness === 'retained-private' && r.rulesVersion === baseline.metrics.rulesVersion), true);
+});
