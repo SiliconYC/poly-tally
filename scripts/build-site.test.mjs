@@ -88,3 +88,20 @@ test('content-versioned filenames cover CSS, entry and nested ESM imports consis
   assert.ok(!next.includes(version));
   await assert.rejects(access(join(root, `site/app.${version}.mjs`)), 'old build artifacts do not leak into the release');
 });
+
+test('new public epoch rejects an old bundled private fallback without rewriting site', async t => {
+  const root = await fixture(t, envelope);
+  await writeFile(join(root, 'web/data/stats.json'), JSON.stringify({...publicStats, datasetEpoch: 'reset-test-v2'}));
+  const {buildSite} = await import('./build-site.mjs');
+  await assert.rejects(buildSite({root, logger: {log() {}}}), /epoch/i);
+});
+
+test('public rebuild explicitly remains pending while private fresh data is unavailable', async t => {
+  const root = await fixture(t);
+  await writeFile(join(root, 'web/data/stats.json'), JSON.stringify({...publicStats, datasetEpoch: 'reset-test-v2'}));
+  const {buildSite} = await import('./build-site.mjs');
+  const result = await buildSite({root, logger: {log() {}}});
+  assert.equal(result.publication.privateStatus, 'pending-rebuild');
+  assert.equal(result.publication.privateUpdatedAt, null);
+  assert.equal(result.publication.privateRepositories, 0);
+});

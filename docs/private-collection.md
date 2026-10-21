@@ -16,6 +16,7 @@
 
 ```bash
 source .venv/bin/activate
+export POLY_TALLY_DATASET_EPOCH=active-default-branches-2026-10-21-v2
 python -m poly_tally collect --git-credential --include-private-metrics --private-metrics-output .poly-tally/private-metrics.json --output .poly-tally/combined-stats.json --refresh
 ```
 
@@ -36,7 +37,7 @@ node scripts/state.mjs save-private .poly-tally/private-metrics.json --git-crede
 
 Codex 或本机 Git 的仓库授权与 GitHub Actions 的授权是两回事。Actions 默认的 `GITHUB_TOKEN` 不能因此读取其他私有仓库，需要额外的只读凭证。参见 [GitHub 的认证说明](https://docs.github.com/en/actions/tutorials/authenticate-with-github_token)。
 
-当前没有把本机宽权限令牌复制到云端。若尚未配置下文 Secret，公开仓库继续定时更新，私有部分保留最近收到的脱敏快照。页面分别显示私有更新时间，不把新的公开扫描时间当作私有已更新。
+当前没有把本机宽权限令牌复制到云端。若尚未配置下文 Secret，公开仓库继续定时更新；本次 `active-default-branches-2026-10-21-v2` 全量重置禁止复用旧批次私有快照，页面显示“私有待重算”，私有更新时间为空。不能把新的公开扫描时间当作私有已更新。
 
 ### 创建最小权限令牌
 
@@ -61,10 +62,12 @@ Codex 或本机 Git 的仓库授权与 GitHub Actions 的授权是两回事。Ac
 
 ## 恢复与规则变化
 
-公开工作流从 `tally-state` 恢复最新脱敏私有快照，无 Secret 时仍可展示。云端采集失败不替换上一版私有快照，页面保留其独立采集时间。
+公开工作流只从 `tally-state` 恢复同一 `datasetEpoch` 的脱敏私有快照。该批次曾完整采集成功后，云端失败可以保留同批次上一版并标记过期；批次首次重算缺少凭证或失败，则不恢复旧私有快照，保持 `pending-rebuild`。首次私有新批次写入必须有已成功重算的同批次公开检查点。
 
-发布会拒绝采集时间倒退、同仓库成功时间倒退，以及未经证实的私有范围缩小，防止旧本地状态或权限撤回覆盖更新、更完整的数据。正常的新扫描 LOC 下降不受限制。私有转公开可由本轮公开扫描证实并去重。
+发布会拒绝采集时间倒退、同仓库成功时间倒退，以及未经证实的私有范围缩小，防止旧本地状态或权限撤回覆盖更新、更完整的数据。正常的新扫描 LOC 下降不受限制。私有转公开可由本轮公开扫描证实并去重；GitHub 明确归档时，仅导出哈希 `archivedRepositoryKeys` 作为排除证据，不导出归档仓库名称、历史或规模。用户明确要求的新批次允许重建范围；同批次的未经证实缩减仍会被拒绝。
 
 规则版本不一致的私有历史保留但不混入当前总量，需要下一次有授权的成功采集才能重算。私有转公开时使用稳定匿名键去重，避免旧私有快照与新公开记录双重计入。
 
 需要重新计算私有历史时，必须拥有本地 SQLite 与对象缓存，或仍能读取源仓库；只有日级公开快照无法反推出逐提交事实。备份方法沿用 [README](../README.md) 中的 SQLite 与对象目录备份。
+
+本次重算重新遍历当前默认分支的完整第一父链历史，不沿用旧状态，也不是仅保留今天一个点。`--dataset-epoch`（或同名环境变量）把状态放入独立 `epochs/<批次>/`；旧状态可恢复但不混入新批次。完整公开重算及验收字段见 [README](../README.md#本次全量重算批次)。

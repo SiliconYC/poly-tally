@@ -34,7 +34,9 @@ class 私有规模导出_类:
 
     def api_构建(self, arg_时间: datetime | None = None) -> dict:
         现在 = (arg_时间 or datetime.now(timezone.utc)).astimezone(timezone.utc)
-        仓库表 = [项 for 项 in self.数据库.api_仓库列表() if 项["private"]]
+        私有表 = [项 for 项 in self.数据库.api_仓库列表() if 项["private"]]
+        归档键 = sorted(self.api_匿名键(项["id"]) for 项 in 私有表 if 项["status"] == "archived")
+        仓库表 = [项 for 项 in 私有表 if 项["status"] != "archived"]
         成功时间 = [datetime.fromisoformat(项["lastSuccessAt"]).astimezone(timezone.utc) for 项 in 仓库表 if 项["lastSuccessAt"] is not None]
         if arg_时间 is None and 成功时间:
             # 导出不是采集；仅重新发布不能把旧的私有事实伪装成今天刚扫描。
@@ -57,4 +59,4 @@ class 私有规模导出_类:
                     历史.append(项)
             结果.append({"id": f"private-{匿名键}", "sourceKey": 匿名键, "name": 仓库["name"], "url": None, "branch": None, "head": None, "visibility": "private", "snapshotKind": "daily", "status": 仓库["status"], "lastSuccessAt": 仓库["lastSuccessAt"], "rulesVersion": 仓库["rulesVersion"], "historyComplete": 仓库["historyComplete"], "notice": self.公开说明, "history": 历史, "skippedFiles": 仓库["skippedFiles"]})
         来源 = "github-actions" if os.environ.get("GITHUB_ACTIONS") == "true" else "local"
-        return {"schemaVersion": 1, "generatedAt": 现在.isoformat().replace("+00:00", "Z"), "rulesVersion": self.规则.版本, "source": 来源, "collection": {"repositories": len(结果), "failed": sum(项["status"] in {"stale", "inaccessible"} for 项 in 结果)}, "repositories": 结果}
+        return {**({"datasetEpoch": self.数据库.数据批次} if getattr(self.数据库, "数据批次", None) else {}), "schemaVersion": 1, "archivedRepositoryKeys": 归档键, "generatedAt": 现在.isoformat().replace("+00:00", "Z"), "rulesVersion": self.规则.版本, "source": 来源, "collection": {"repositories": len(结果), "failed": sum(项["status"] in {"stale", "inaccessible"} for 项 in 结果)}, "repositories": 结果}

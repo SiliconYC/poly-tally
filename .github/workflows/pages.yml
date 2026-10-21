@@ -15,6 +15,11 @@ concurrency:
 permissions:
   contents: read
 
+# Bump only for an explicitly requested full baseline rebuild. No prior epoch
+# checkpoint/cache/private snapshot may enter the new dataset.
+env:
+  POLY_TALLY_DATASET_EPOCH: active-default-branches-2026-10-21-v2
+
 jobs:
   private:
     runs-on: ubuntu-latest
@@ -32,7 +37,7 @@ jobs:
             echo 'configured=true' >> "$GITHUB_OUTPUT"
           else
             echo 'configured=false' >> "$GITHUB_OUTPUT"
-            echo 'No private source token; retain durable sanitized metrics.'
+            echo 'No private source token; a missing current-epoch snapshot remains pending rebuild.'
           fi
       - uses: actions/checkout@v4
         if: steps.credential.outputs.configured == 'true'
@@ -63,14 +68,14 @@ jobs:
             --state "$RUNNER_TEMP/private-tally" \
             --output "$RUNNER_TEMP/private-public-stats.json" \
             --private-metrics-output "$RUNNER_TEMP/private-metrics.json" \
-            --refresh --allow-partial > "$RUNNER_TEMP/private-collect.log" 2>&1 \
+            --refresh > "$RUNNER_TEMP/private-collect.log" 2>&1 \
             && node scripts/metrics.mjs validate "$RUNNER_TEMP/private-metrics.json" --complete; then
             echo 'available=true' >> "$GITHUB_OUTPUT"
             echo 'status=available' >> "$GITHUB_OUTPUT"
           else
             echo 'available=false' >> "$GITHUB_OUTPUT"
             echo 'status=stale' >> "$GITHUB_OUTPUT"
-            echo '::warning::Private collection incomplete; retain the previous sanitized snapshot.'
+            echo '::warning::Private collection incomplete; only an existing same-epoch snapshot may be retained.'
           fi
       # 私有 Git 对象、SQLite、检查点和诊断日志不能进入 cache 或 artifact。
       - name: Stage only the sanitized private snapshot
@@ -116,10 +121,11 @@ jobs:
       - name: Restore optional public object and parser caches
         uses: actions/cache@v4
         with:
-          path: .poly-tally
-          key: tally-v1-${{ runner.os }}-${{ github.run_id }}
-          restore-keys: tally-v1-${{ runner.os }}-
-      - name: Restore durable public checkpoint and sanitized private baseline
+          path: .poly-tally/epochs/${{ env.POLY_TALLY_DATASET_EPOCH }}
+          key: tally-${{ env.POLY_TALLY_DATASET_EPOCH }}-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: tally-${{ env.POLY_TALLY_DATASET_EPOCH }}-${{ runner.os }}-
+      - name: Restore only current-epoch public checkpoint and sanitized private baseline
+        id: restore-state
         env:
           GH_TOKEN: ${{ github.token }}
         run: node scripts/state.mjs restore .poly-tally/remote-checkpoint.json web/data/private-metrics.json
@@ -131,16 +137,24 @@ jobs:
         with:
           name: private-candidate
           path: ${{ runner.temp }}/private-candidate
-      - name: Collect public repositories
+      - name: Collect public repositories from the current default branches
         env:
+          RESET_REQUIRED: ${{ steps.restore-state.outputs.reset-required }}
           POLY_TALLY_TOKEN: ${{ github.token }}
         run: |
           restore=()
-          if [ -f .poly-tally/remote-checkpoint.json ]; then
+          partial=(--allow-partial)
+          state=.poly-tally
+          if [ "$RESET_REQUIRED" = 'true' ]; then
+            # Do not reuse even a same-epoch cache from a failed persistence attempt.
+            state="$RUNNER_TEMP/public-reset"
+            partial=()
+          fi
+          if [ "$RESET_REQUIRED" != 'true' ] && [ -f .poly-tally/remote-checkpoint.json ]; then
             restore=(--import-checkpoint .poly-tally/remote-checkpoint.json --authoritative-checkpoint)
             cp .poly-tally/remote-checkpoint.json .poly-tally/checkpoint.json
           fi
-          python -m poly_tally collect --public-only --refresh --allow-partial --checkpoint .poly-tally/checkpoint.json "${restore[@]}"
+          python -m poly_tally collect --public-only --refresh --state "$state" "${partial[@]}" --checkpoint .poly-tally/checkpoint.json "${restore[@]}"
       - name: Adopt a complete private snapshot only when its scope is preserved
         id: adopt
         if: needs.private.outputs.available == 'true' && steps.candidate.outcome == 'success'
@@ -151,7 +165,7 @@ jobs:
             echo 'status=stale' >> "$GITHUB_OUTPUT"
             echo '::warning::Private snapshot rejected; retain the previous sanitized snapshot.'
           fi
-      - name: Build dashboard with the retained or fresh sanitized snapshot
+      - name: Build dashboard with fresh or same-epoch metrics; missing private rebuild stays pending
         env:
           PRIVATE_JOB_RESULT: ${{ needs.private.result }}
           PRIVATE_SCAN_STATUS: ${{ needs.private.outputs.status }}

@@ -26,13 +26,16 @@ function validateMetrics(value) {
 }
 
 export function validatePrivateMetrics(envelope) {
-  exactKeys(envelope, ['schemaVersion', 'generatedAt', 'rulesVersion', 'source', 'collection', 'repositories']);
+  exactKeys(envelope, ['schemaVersion', 'generatedAt', 'rulesVersion', 'source', 'collection', 'repositories', ...('datasetEpoch' in envelope ? ['datasetEpoch'] : []), ...('archivedRepositoryKeys' in envelope ? ['archivedRepositoryKeys'] : [])]);
+  if ('datasetEpoch' in envelope && !/^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/.test(envelope.datasetEpoch)) reject();
+  if ('archivedRepositoryKeys' in envelope && (!Array.isArray(envelope.archivedRepositoryKeys) || !envelope.archivedRepositoryKeys.every(hexKey) || new Set(envelope.archivedRepositoryKeys).size !== envelope.archivedRepositoryKeys.length)) reject();
   exactKeys(envelope.collection, ['repositories', 'failed']);
   if (envelope.schemaVersion !== 1 || !iso(envelope.generatedAt) || !hexKey(envelope.rulesVersion) || !['local', 'github-actions'].includes(envelope.source) || !Array.isArray(envelope.repositories) || !integer(envelope.collection.repositories) || envelope.collection.repositories !== envelope.repositories.length || !integer(envelope.collection.failed) || envelope.collection.failed > envelope.collection.repositories) reject();
   const seen = new Set();
   for (const repository of envelope.repositories) {
     exactKeys(repository, repositoryKeys);
     if (!hexKey(repository.sourceKey) || repository.id !== `private-${repository.sourceKey}` || !repositoryName(repository) || seen.has(repository.sourceKey) || repository.visibility !== 'private' || repository.snapshotKind !== 'daily' || repository.url !== null || repository.branch !== null || repository.head !== null || !statuses.has(repository.status) || (repository.lastSuccessAt !== null && !iso(repository.lastSuccessAt)) || !hexKey(repository.rulesVersion) || typeof repository.historyComplete !== 'boolean' || repository.notice !== notice || !integer(repository.skippedFiles) || !Array.isArray(repository.history)) reject();
+    if (envelope.archivedRepositoryKeys?.includes(repository.sourceKey)) reject();
     seen.add(repository.sourceKey);
     let previousDay = '';
     for (const snapshot of repository.history) {
@@ -57,13 +60,14 @@ export function validatePrivateMetrics(envelope) {
 export function mergePrivateMetrics(publicStats, envelope) {
   validatePrivateMetrics(envelope);
   if (publicStats?.schemaVersion !== 1 || !Array.isArray(publicStats.repositories) || typeof publicStats.rules?.version !== 'string') throw new Error('Invalid public dataset');
+  if (publicStats.datasetEpoch !== envelope.datasetEpoch) throw new Error('Dataset epoch mismatch; old private metrics cannot enter the rebuilt dataset.');
   const data = structuredClone(publicStats);
   const privateData = structuredClone(envelope);
   if (!Number.isFinite(Date.parse(data.generatedAt)) || Date.parse(envelope.generatedAt) > Date.parse(data.generatedAt)) data.generatedAt = envelope.generatedAt;
-  const current = repository => ['active', 'archived'].includes(repository.status) && repository.rulesVersion === data.rules.version;
-  const publicRepositories = data.repositories.filter(repository => repository.visibility !== 'private' && !repository.id.startsWith('private-'));
+  const current = repository => repository.status === 'active' && repository.rulesVersion === data.rules.version;
+  const publicRepositories = data.repositories.filter(repository => repository.status !== 'archived' && repository.visibility !== 'private' && !repository.id.startsWith('private-'));
   const publicKeys = new Set(publicRepositories.filter(current).map(repository => anonymousKey(repository.id)));
-  const privateRepositories = privateData.repositories.filter(repository => !publicKeys.has(repository.sourceKey));
+  const privateRepositories = privateData.repositories.filter(repository => repository.status !== 'archived' && !publicKeys.has(repository.sourceKey));
   const privateKeys = new Set(privateRepositories.map(repository => repository.sourceKey));
   data.repositories = [...publicRepositories.filter(repository => !privateKeys.has(anonymousKey(repository.id))), ...privateRepositories];
   const counted = data.repositories.filter(repository => current(repository) && repository.history.length > 0);
@@ -79,10 +83,14 @@ export function mergePrivateMetrics(publicStats, envelope) {
   return data;
 }
 
-export function validatePrivateMetricsReplacement(previous, next, publicStats) {
+export function validatePrivateMetricsReplacement(previous, next, publicStats, {resetEpoch} = {}) {
   validatePrivateMetrics(previous);
   validatePrivateMetrics(next);
   if (next.collection.failed > 0) throw new Error('Private collection incomplete; retaining durable sanitized metrics');
+  if (previous.datasetEpoch !== next.datasetEpoch) {
+    if (resetEpoch && resetEpoch === next.datasetEpoch) return true;
+    throw new Error('Dataset epoch mismatch; explicit reset required.');
+  }
   if (timeKey(next.generatedAt) < timeKey(previous.generatedAt)) throw new Error('Private snapshot is older than durable metrics; retaining previous sanitized metrics.');
   const nextByKey = new Map(next.repositories.map(repository => [repository.sourceKey, repository]));
   for (const repository of previous.repositories) {
@@ -90,9 +98,9 @@ export function validatePrivateMetricsReplacement(previous, next, publicStats) {
     if (replacement && repository.lastSuccessAt !== null && (replacement.lastSuccessAt === null || timeKey(replacement.lastSuccessAt) < timeKey(repository.lastSuccessAt))) throw new Error('Private repository success time is older than durable metrics; retaining previous sanitized metrics.');
   }
   const available = new Set(next.repositories.map(repository => repository.sourceKey));
-  const publicKeys = new Set((publicStats?.repositories ?? []).filter(repository => repository.visibility !== 'private' && !String(repository.id).startsWith('private-') && ['active', 'archived'].includes(repository.status) && repository.rulesVersion === next.rulesVersion && repository.rulesVersion === publicStats.rules?.version).map(repository => anonymousKey(repository.id)));
+  const publicKeys = new Set((publicStats?.repositories ?? []).filter(repository => repository.visibility !== 'private' && !String(repository.id).startsWith('private-') && repository.status === 'active' && repository.rulesVersion === next.rulesVersion && repository.rulesVersion === publicStats.rules?.version).map(repository => anonymousKey(repository.id)));
   // 无状态 CI 无法区分权限缩小和仓库消失；只有已证实转公开时才能移除匿名记录。
-  if (previous.repositories.some(repository => !available.has(repository.sourceKey) && !publicKeys.has(repository.sourceKey))) throw new Error('Private repository scope decreased; retaining previous sanitized metrics.');
+  if (previous.repositories.some(repository => !available.has(repository.sourceKey) && !publicKeys.has(repository.sourceKey) && !next.archivedRepositoryKeys?.includes(repository.sourceKey))) throw new Error('Private repository scope decreased; retaining previous sanitized metrics.');
   return true;
 }
 
@@ -101,13 +109,15 @@ export async function adoptPrivateMetrics(filename, candidateFilename, publicFil
   const next = JSON.parse(bytes);
   validatePrivateMetrics(next);
   if (next.collection.failed > 0) throw new Error('Private collection incomplete; retaining durable sanitized metrics');
+  const publicStats = JSON.parse(await readFile(publicFilename, 'utf8'));
+  if (publicStats.datasetEpoch !== next.datasetEpoch) throw new Error('Dataset epoch mismatch; refusing private adoption.');
   let previousBytes;
   try {
     previousBytes = await readFile(filename, 'utf8');
   } catch (error) {
     if (error.code !== 'ENOENT') throw error;
   }
-  if (previousBytes !== undefined) validatePrivateMetricsReplacement(JSON.parse(previousBytes), next, JSON.parse(await readFile(publicFilename, 'utf8')));
+  if (previousBytes !== undefined) validatePrivateMetricsReplacement(JSON.parse(previousBytes), next, publicStats, {resetEpoch: publicStats.datasetEpoch});
   const temporary = `${filename}.${process.pid}.tmp`;
   try {
     await writeFile(temporary, bytes);

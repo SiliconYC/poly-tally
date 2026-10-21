@@ -29,12 +29,15 @@ class 采集器_类:
         arg_令牌: str | None,
         arg_仅公开: bool,
         arg_仅私有: bool = False,
+        arg_数据批次: str | None = None,
     ) -> None:
         self.配置 = arg_配置
         if not arg_配置["owners"]:
             raise ValueError("owners 至少包含一个账号或组织")
         self.规则 = 规则_类(arg_配置["rules"])
         self.引擎 = 历史引擎_类(arg_目录, self.规则)
+        self.数据批次 = arg_数据批次
+        self.引擎.数据库.数据批次 = arg_数据批次
         self.发现器 = GitHub发现器_类(arg_令牌, arg_仅公开)
         self.仅公开 = arg_仅公开
         self.仅私有 = arg_仅私有
@@ -59,7 +62,7 @@ class 采集器_类:
             元数据表 = self.发现器.api_发现(self.配置["owners"])
         except (requests.RequestException, ValueError) as 异常:
             for 仓库 in 已知.values():
-                if 仓库["status"] != "cold":
+                if 仓库["status"] not in {"cold", "archived"}:
                     self._失败状态(仓库, "仓库发现失败；保留最后成功历史，等待下一轮重试")
             失败 = max(1, len(已知))
             公开失败 = max(1, sum(not 项["private"] for 项 in 已知.values()))
@@ -74,6 +77,9 @@ class 采集器_类:
             if 旧状态:
                 旧状态.update({"private": 元数据["private"], "name": 元数据["full_name"], "url": f"https://github.com/{元数据['full_name']}"})
                 self.引擎.数据库.api_保存仓库(旧状态)
+            if 元数据.get("archived") is True:
+                self._排除归档(元数据)
+                continue
             # 显式确认的冷数据不会因同名或列表重新出现而自动激活。
             if 旧状态 and 旧状态["status"] == "cold":
                 continue
@@ -116,12 +122,15 @@ class 采集器_类:
                 continue
             if ID in 已见:
                 continue
-            if 状态["status"] == "cold":
+            if 状态["status"] in {"cold", "archived"}:
                 try:
                     元数据 = self.发现器.api_读取仓库(状态["name"])
                     if str(元数据["id"]) == ID:
                         状态.update({"private": 元数据["private"], "name": 元数据["full_name"], "url": f"https://github.com/{元数据['full_name']}"})
-                        self.引擎.数据库.api_保存仓库(状态)
+                        if 元数据.get("archived") is True:
+                            self._排除归档(元数据)
+                        else:
+                            self.引擎.数据库.api_保存仓库(状态)
                 except requests.RequestException:
                     # 已确认删除的冷数据本就可能 404；读取不到新元数据不撤销历史授权。
                     状态["notice"] = "冷数据元数据不可访问；保留已授权的历史档案与原口径"
@@ -139,6 +148,9 @@ class 采集器_类:
                 状态["name"] = 元数据["full_name"]
                 状态["url"] = f"https://github.com/{元数据['full_name']}"
                 状态["private"] = 元数据["private"]
+                if 元数据.get("archived") is True:
+                    self._排除归档(元数据)
+                    continue
                 提示 = "仓库未出现在完整发现列表中；保留历史，等待下一次发现确认"
             except (requests.RequestException, RuntimeError):
                 提示 = "仓库缺失或无访问权限；尚未确认删除，保留最后成功历史"
@@ -146,18 +158,24 @@ class 采集器_类:
             失败 += 1
             if not 状态["private"]:
                 公开失败 += 1
-        仓库表 = self.引擎.api_仓库列表()
+        仓库表 = [项 for 项 in self.引擎.api_仓库列表() if 项["status"] != "archived"]
         公共运行 = {"finishedAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"), "durationSeconds": round(time.monotonic() - 开始, 3), "repositories": sum(not 项["private"] for 项 in 仓库表), "failed": 公开失败, **公开计数}
         运行 = {**公共运行, "repositories": len(仓库表), "failed": 失败, **{键: self.引擎.计数[键] - 基线[键] for 键 in 基线}, "publicRun": 公共运行}
         self.引擎.数据库.api_记录运行(运行)
         return 运行
+
+    def _排除归档(self, arg_元数据: dict) -> None:
+        # 只保留稳定 ID 的归档证据，不保留可进入统计的旧历史、HEAD 或文件清单。
+        状态 = self._空状态(arg_元数据)
+        状态.update({"status": "archived", "notice": "GitHub 已归档；不参与任何统计"})
+        self.引擎.数据库.api_保存仓库(状态)
 
     def _名称在范围(self, arg_全名: str) -> bool:
         所有者 = arg_全名.split("/")[0].casefold()
         return 所有者 in {账号.casefold() for 账号 in self.配置["owners"]} and any(规则_类.api_匹配(arg_全名.casefold(), 模式.casefold()) for 模式 in self.配置["repositories"]["include"]) and not any(规则_类.api_匹配(arg_全名.casefold(), 模式.casefold()) for 模式 in self.配置["repositories"]["exclude"])
 
     def _纳入(self, arg_元数据: dict) -> bool:
-        return self._名称在范围(arg_元数据["full_name"]) and (not arg_元数据["fork"] or self.规则.配置["include_forks"])
+        return not arg_元数据.get("archived", False) and self._名称在范围(arg_元数据["full_name"]) and (not arg_元数据["fork"] or self.规则.配置["include_forks"])
 
     def _空状态(self, arg_元数据: dict) -> dict:
         return {"id": str(arg_元数据["id"]), "name": arg_元数据["full_name"], "url": f"https://github.com/{arg_元数据['full_name']}", "branch": arg_元数据["default_branch"], "head": None, "private": arg_元数据["private"], "status": "empty", "lastSuccessAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"), "rulesVersion": self.规则.版本, "historyComplete": True, "notice": "等待首个提交", "history": [], "inventory": {}, "skippedFiles": 0}
@@ -192,6 +210,10 @@ class 采集器_类:
         if any(项["private"] for 项 in 仓库表):
             raise ValueError("公开检查点禁止包含私有仓库；私有状态请使用 SQLite backup")
         数据 = {"schemaVersion": 1, "repositories": 仓库表, "generatedAt": datetime.now(timezone.utc).isoformat()}
+        if self.数据批次:
+            数据["datasetEpoch"] = self.数据批次
+            运行 = self.引擎.数据库.api_最近运行()
+            数据["collection"] = 运行[0].get("publicRun", {}) if 运行 else {}
         if arg_路径.exists() and 公开导出_类.api_指纹(json.loads(arg_路径.read_text())) == 公开导出_类.api_指纹(数据):
             return False
         公开导出_类.api_原子写入(arg_路径, 数据)
@@ -203,6 +225,8 @@ class 采集器_类:
             raise ValueError("不支持的检查点版本或结构")
         if "generatedAt" not in 数据 or not isinstance(数据["generatedAt"], str) or "repositories" not in 数据 or not isinstance(数据["repositories"], list):
             raise ValueError("检查点缺少生成时间或仓库列表")
+        if self.数据批次 and 数据.get("datasetEpoch") != self.数据批次:
+            raise ValueError("检查点批次不匹配；新批次必须从当前默认分支重新采集")
         已见: set[str] = set()
         写入: list[tuple[str, str]] = []
         for 仓库 in 数据["repositories"]:

@@ -218,3 +218,42 @@ class Test采集_类(unittest.TestCase):
             采集器.api_采集()
         self.assertTrue(self.库.api_仓库列表()[0]["private"])
         self.assertEqual(公开导出_类(self.库, self.规则).api_构建()["repositories"], [])
+
+    def test_GitHub归档仓库不读取默认分支且清空统计历史(self) -> None:
+        元数据 = {"id": 1, "full_name": "fixture/one", "default_branch": "main", "private": False, "archived": True, "fork": False, "clone_url": "https://github.com/fixture/one.git", "size": 1}
+        采集器 = 采集器_类(self.配置, self.根 / "state", None, True)
+        self.addCleanup(采集器.api_关闭)
+        with patch.object(采集器.发现器, "api_发现", return_value=[元数据]), patch.object(采集器.发现器, "api_读取默认分支") as 分支:
+            运行 = 采集器.api_采集()
+        分支.assert_not_called()
+        self.assertEqual(运行["repositories"], 0)
+        self.assertEqual(self.库.api_读取仓库("1")["history"], [])
+        数据 = 公开导出_类(self.库, self.规则).api_构建()
+        self.assertEqual(数据["repositories"], [])
+        self.assertEqual(数据["summary"]["code"], 0)
+
+    def test_旧归档记录不进入任何公开统计(self) -> None:
+        self.状态["status"] = "archived"
+        self.库.api_保存仓库(self.状态)
+        数据 = 公开导出_类(self.库, self.规则).api_构建()
+        self.assertEqual(数据["repositories"], [])
+        self.assertEqual(数据["summary"]["code"], 0)
+
+    def test_列表缺失但直读确认已归档时不保留计数(self) -> None:
+        元数据 = {"id": 1, "full_name": "fixture/one", "default_branch": "main", "private": False, "archived": True, "fork": False, "size": 1}
+        采集器 = 采集器_类(self.配置, self.根 / "state", None, True)
+        self.addCleanup(采集器.api_关闭)
+        with patch.object(采集器.发现器, "api_发现", return_value=[]), patch.object(采集器.发现器, "api_读取仓库", return_value=元数据):
+            运行 = 采集器.api_采集()
+        self.assertEqual(运行["failed"], 0)
+        self.assertEqual(self.库.api_读取仓库("1")["status"], "archived")
+        self.assertEqual(公开导出_类(self.库, self.规则).api_构建()["repositories"], [])
+
+    def test_检查点只刷新运行证据不制造无数据变化写入(self) -> None:
+        采集器 = 采集器_类(self.配置, self.根 / "state", None, True, arg_数据批次="fixture-v2")
+        self.addCleanup(采集器.api_关闭)
+        路径 = self.根 / "epoch-checkpoint.json"
+        self.库.api_记录运行({"publicRun": {"failed": 0, "finishedAt": "2026-10-21T00:00:00Z", "recomputedCommits": 1}})
+        self.assertTrue(采集器.api_保存检查点(路径))
+        self.库.api_记录运行({"publicRun": {"failed": 0, "finishedAt": "2026-10-22T00:00:00Z", "recomputedCommits": 0}})
+        self.assertFalse(采集器.api_保存检查点(路径))

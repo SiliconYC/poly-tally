@@ -1,6 +1,6 @@
 import {createHash} from 'node:crypto';
 import {execFileSync} from 'node:child_process';
-import {mkdir, readFile, writeFile} from 'node:fs/promises';
+import {appendFile, mkdir, readFile, writeFile, rm} from 'node:fs/promises';
 import {dirname} from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {validatePrivateMetrics, validatePrivateMetricsReplacement} from './metrics.mjs';
@@ -43,6 +43,8 @@ function localCredential(repository, env) {
 }
 
 export async function runState(command, filename, privateFilename, {env = process.env, fetcher = fetch, logger = console, gitCredential = false, credentialReader = localCredential} = {}) {
+  const epoch = env.POLY_TALLY_DATASET_EPOCH;
+  if (epoch && !/^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/.test(epoch)) throw new Error('Invalid dataset epoch');
   const repository = env.GITHUB_REPOSITORY;
   if (!repository || !/^[\w.-]+\/[\w.-]+$/.test(repository)) throw new Error('GITHUB_REPOSITORY is required');
   if (!['restore', 'save', 'save-private'].includes(command) || !filename || (command === 'save-private' && privateFilename)) throw new Error('Usage: state.mjs restore|save checkpoint [sanitized-private-file] | save-private sanitized-private-file');
@@ -61,6 +63,7 @@ export async function runState(command, filename, privateFilename, {env = proces
       files.push({path: 'private-metrics.json', bytes, data: privateData(bytes, true)});
     }
   }
+  if (epoch && files.some(file => file.data.datasetEpoch !== epoch)) throw new Error('Dataset epoch mismatch; refusing durable publication.');
   const headers = {Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28'};
   if (token) headers.Authorization = `Bearer ${token}`;
   async function api(path, method = 'GET', body, allowMissing = false) {
@@ -78,30 +81,48 @@ export async function runState(command, filename, privateFilename, {env = proces
     return Buffer.from(blob.content, 'base64');
   }
   if (command === 'restore') {
-    if (!ref) {
-      logger.log('No durable state branch yet; retaining bundled sanitized metrics.');
-      return;
-    }
     const checkpoint = entryFor('checkpoint.json');
     const metrics = entryFor('private-metrics.json');
-    if (!checkpoint && !metrics) throw new Error('Durable state branch has no checkpoint; refusing to lose collected history');
+    if (ref && !checkpoint && !metrics) throw new Error('Durable state branch has no checkpoint; refusing to lose collected history');
     const restore = [];
+    let publicCurrent = false;
+    let privateCurrent = false;
     if (checkpoint) {
       const bytes = await readBlob(checkpoint);
-      publicData(bytes);
-      restore.push({filename, bytes});
+      const data = publicData(bytes);
+      if (!epoch || data.datasetEpoch === epoch) {
+        restore.push({filename, bytes});
+        publicCurrent = true;
+      }
     }
     if (metrics && privateFilename) {
       const bytes = await readBlob(metrics);
-      privateData(bytes, true);
-      restore.push({filename: privateFilename, bytes});
+      const data = privateData(bytes, true);
+      if (!epoch || (data.datasetEpoch === epoch && publicCurrent)) {
+        restore.push({filename: privateFilename, bytes});
+        privateCurrent = true;
+      }
+    }
+    // Remove only local generated inputs, never the durable branch or Git history.
+    // A bundled/cache snapshot cannot impersonate the newly requested baseline.
+    if (epoch) {
+      if (!publicCurrent) await rm(filename, {force: true});
+      if (!privateCurrent && privateFilename) await rm(privateFilename, {force: true});
     }
     for (const item of restore) {
       await mkdir(dirname(item.filename), {recursive: true});
       await writeFile(item.filename, item.bytes);
     }
-    logger.log('Restored available durable public checkpoint and sanitized private metrics.');
-    return;
+    logger.log(epoch && !publicCurrent ? 'New dataset epoch: public rebuild required; prior snapshots are excluded.' : 'Restored available durable public checkpoint and sanitized private metrics.');
+    return {resetRequired: Boolean(epoch && !publicCurrent), privatePending: Boolean(epoch && !privateCurrent)};
+  }
+  let checkpoint = files.find(item => item.path === 'checkpoint.json')?.data;
+  const checkpointEntry = entryFor('checkpoint.json');
+  const previousCheckpoint = checkpointEntry ? publicData(await readBlob(checkpointEntry)) : undefined;
+  checkpoint ??= previousCheckpoint;
+  if (epoch) {
+    if (checkpoint?.datasetEpoch !== epoch) throw new Error('Current public dataset epoch is required before private publication.');
+    if (previousCheckpoint?.datasetEpoch !== epoch && checkpoint.collection?.failed !== 0) throw new Error('A complete public rebuild is required to initialize the new dataset epoch.');
   }
   const changed = [];
   for (const file of files) {
@@ -110,11 +131,8 @@ export async function runState(command, filename, privateFilename, {env = proces
     if (entry?.sha === sha) continue;
     if (entry && file.path === 'private-metrics.json') {
       const previous = privateData(await readBlob(entry), true);
-      let checkpoint = files.find(item => item.path === 'checkpoint.json')?.data;
-      const checkpointEntry = entryFor('checkpoint.json');
-      if (!checkpoint && checkpointEntry) checkpoint = publicData(await readBlob(checkpointEntry));
       const publicStats = checkpoint ? {rules: {version: file.data.rulesVersion}, repositories: checkpoint.repositories} : undefined;
-      validatePrivateMetricsReplacement(previous, file.data, publicStats);
+      validatePrivateMetricsReplacement(previous, file.data, publicStats, {resetEpoch: epoch});
       // 采集时刻变化不产生数据提交；发布页面仍使用本次实际收到的快照时间。
       if (privateFingerprint(previous) === privateFingerprint(file.data)) continue;
     }
@@ -142,7 +160,10 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     const gitCredential = arguments_.includes('--git-credential');
     const [command, filename, privateFilename, ...extra] = arguments_.filter(argument => argument !== '--git-credential');
     if (extra.length) throw new Error('Unexpected state arguments');
-    await runState(command, filename, privateFilename, {gitCredential});
+    const result = await runState(command, filename, privateFilename, {gitCredential});
+    if (command === 'restore' && process.env.GITHUB_OUTPUT) {
+      await appendFile(process.env.GITHUB_OUTPUT, `reset-required=${result.resetRequired}\nprivate-pending=${result.privatePending}\n`);
+    }
   } catch (error) {
     console.error(error.code === 'ENOENT' ? 'Required state input file is missing.' : error.message);
     process.exitCode = 1;

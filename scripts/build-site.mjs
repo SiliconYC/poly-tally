@@ -67,6 +67,9 @@ export async function buildSite({root = resolve(import.meta.dirname, '..'), priv
     data = mergePrivateMetrics(data, privateData);
     if (privateStatus === 'stale') data.publication.privateStatus = 'stale';
   }
+  if (data.datasetEpoch && privateBytes === undefined) {
+    data.publication = {privateRepositories: 0, privateUpdatedAt: null, privateSource: null, privateStatus: 'pending-rebuild'};
+  }
   await rm(resolve(root, 'site'), {recursive: true, force: true});
   await mkdir(resolve(root, 'site'), {recursive: true});
   await cp(resolve(root, 'web'), resolve(root, 'site'), {recursive: true, filter: path => !path.endsWith('.test.mjs') && path !== resolve(root, 'web/data/private-metrics.json')});

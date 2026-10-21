@@ -2,6 +2,7 @@
 import argparse
 import json
 import os
+import re
 from pathlib import Path
 import sqlite3
 
@@ -18,6 +19,7 @@ def 主入口() -> int:
     参数器.add_argument("command", choices=["collect", "export", "retire", "resume", "backup", "restore", "checkpoint"])
     参数器.add_argument("repository_id", nargs="?")
     参数器.add_argument("--config", type=Path, default=Path("config.json"))
+    参数器.add_argument("--dataset-epoch", default=os.environ.get("POLY_TALLY_DATASET_EPOCH"), help="隔离重算批次；新批次使用独立状态且禁止导入旧检查点")
     参数器.add_argument("--state", type=Path, default=Path(".poly-tally"))
     参数器.add_argument("--output", type=Path, default=Path("web/data/stats.json"))
     范围参数 = 参数器.add_mutually_exclusive_group()
@@ -33,6 +35,10 @@ def 主入口() -> int:
     参数器.add_argument("--authoritative-checkpoint", action="store_true", help="以导入检查点为准，覆盖可能过期的 Actions 缓存")
     参数器.add_argument("--backup", type=Path, help="SQLite 一致性备份或恢复文件")
     参数 = 参数器.parse_args()
+    if 参数.dataset_epoch:
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,79}", 参数.dataset_epoch):
+            参数器.error("dataset epoch 必须是安全的批次名称")
+        参数.state = 参数.state / "epochs" / 参数.dataset_epoch
     配置 = json.loads(参数.config.read_text(encoding="utf-8"))
     令牌 = 凭证_类.api_读取(参数.git_credential)
     if 参数.command == "collect" and not 参数.public_only and 令牌 is None:
@@ -45,7 +51,7 @@ def 主入口() -> int:
         参数.state.mkdir(parents=True, exist_ok=True, mode=0o700)
         参数.state.chmod(0o700)
     with 运行锁_类(参数.state / "run.lock"):
-        采集器 = 采集器_类(配置, 参数.state, 令牌, 参数.public_only, 参数.private_only)
+        采集器 = 采集器_类(配置, 参数.state, 令牌, 参数.public_only, 参数.private_only, 参数.dataset_epoch)
         try:
             if 参数.import_checkpoint:
                 采集器.api_恢复检查点(参数.import_checkpoint, 参数.authoritative_checkpoint)

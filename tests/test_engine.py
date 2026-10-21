@@ -226,3 +226,36 @@ class Test历史_类(unittest.TestCase):
         self.assertEqual(self._同步()["skippedFiles"], 0)
         self.元数据.update({"id": 1, "full_name": "fixture/one"})
         self.assertEqual(self._同步()["skippedFiles"], 0)
+
+    def test_新批次从当前默认分支完整重建且保留该分支历史并恢复增量(self) -> None:
+        from unittest.mock import patch
+        from poly_tally.__main__ import 主入口
+        from poly_tally.github import GitHub发现器_类
+        旧提交 = self._提交({"old.py": "old = 1\nold2 = 2\n"})
+        self._同步()
+        self._git("checkout", "--orphan", "current-default")
+        self._git("rm", "-rf", ".")
+        首 = self._提交({"new.py": "x = 1\n"}, "2023-01-01T00:00:00+00:00")
+        末 = self._提交({"new.py": "x = 1\ny = 2\n"}, "2023-02-01T00:00:00+00:00")
+        元数据 = {**self.元数据, "default_branch": "current-default"}
+        归档 = {**元数据, "id": 2, "full_name": "fixture/archived", "archived": True}
+        配置文件 = self.根 / "config.json"
+        配置文件.write_text(json.dumps({"owners": ["fixture"], "repositories": {"include": ["fixture/*"], "exclude": []}, "rules": self.规则配置}))
+        产物 = self.根 / "fresh.json"
+        检查点 = self.根 / "fresh-checkpoint.json"
+        参数 = ["poly_tally", "collect", "--public-only", "--dataset-epoch", "fixture-reset-v2", "--config", str(配置文件), "--state", str(self.根 / "state"), "--output", str(产物), "--checkpoint", str(检查点), "--refresh"]
+        def 采集():
+            with patch("sys.argv", 参数), patch.object(GitHub发现器_类, "api_发现", return_value=[元数据, 归档]), patch.object(GitHub发现器_类, "api_读取默认分支", return_value=末) as 分支:
+                self.assertEqual(主入口(), 0)
+                self.assertEqual(分支.call_count, 1)
+            return json.loads(产物.read_text())
+        数据 = 采集()
+        self.assertEqual(数据["datasetEpoch"], "fixture-reset-v2")
+        self.assertEqual([项["id"] for 项 in 数据["repositories"]], ["1"])
+        self.assertEqual([项["sha"] for 项 in 数据["repositories"][0]["history"]], [首, 末])
+        self.assertNotIn(旧提交, 产物.read_text())
+        self.assertEqual(数据["repositories"][0]["branch"], "current-default")
+        self.assertEqual(数据["summary"]["code"], 2)
+        self.assertEqual(数据["runs"][0]["recomputedCommits"], 2)
+        self.assertEqual(采集()["runs"][0]["recomputedCommits"], 0)
+        self.assertEqual(self.引擎.api_仓库列表()[0]["head"], 旧提交, "旧批次可恢复但不会混入新统计")
