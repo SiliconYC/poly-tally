@@ -9,7 +9,8 @@ const notice = '私有仓库：仅公开按日规模，不公开源码与提交�
 const anonymousKey = id => createHash('sha256').update(`poly-tally/repository/${id}`).digest('hex').slice(0, 16);
 const repositoryKeys = ['id', 'name', 'sourceKey', 'visibility', 'snapshotKind', 'url', 'branch', 'head', 'status', 'lastSuccessAt', 'rulesVersion', 'historyComplete', 'notice', 'skippedFiles', 'history'];
 const hexKey = value => typeof value === 'string' && /^[a-f0-9]{16}$/.test(value);
-const repositoryName = repository => repository.name === `私有仓库 · ${repository.sourceKey.slice(0, 6)}` || (typeof repository.name === 'string' && /^[A-Za-z0-9][A-Za-z0-9-]{0,38}\/[A-Za-z0-9_.-]{1,100}$/.test(repository.name) && !['.', '..'].includes(repository.name.split('/')[1]));
+const fullName = name => typeof name === 'string' && /^[A-Za-z0-9][A-Za-z0-9-]{0,38}\/[A-Za-z0-9_.-]{1,100}$/.test(name) && !['.', '..'].includes(name.split('/')[1]);
+const repositoryName = repository => repository.name === `私有仓库 · ${repository.sourceKey.slice(0, 6)}` || fullName(repository.name);
 const timeKey = value => value.replace(/(?:\.(\d+))?Z$/, (_match, fraction = '') => `.${fraction.padEnd(6, '0')}Z`);
 const integer = value => Number.isSafeInteger(value) && value >= 0;
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -25,18 +26,60 @@ function validateMetrics(value) {
   if (!metricKeys.every(key => integer(value[key]))) reject();
 }
 
+function calendarDate(value) {
+  return typeof value === 'string' && /^\d{4}-\d\d-\d\d$/.test(value) && Number.isFinite(Date.parse(value)) && new Date(value).toISOString().slice(0, 10) === value;
+}
+function validateLineage(repository, version) {
+  const lineage = repository.lineage;
+  exactKeys(lineage, ['id', 'version', 'members', 'dominantMember', 'representativeMember']);
+  if (typeof lineage.id !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(lineage.id) || !hexKey(lineage.version) || lineage.version !== version || repository.sourceKey !== anonymousKey(`lineage:${lineage.id}`) || !Array.isArray(lineage.members) || lineage.members.length < 1) reject();
+  const names = new Set(), keys = new Set();
+  for (const member of lineage.members) {
+    exactKeys(member, ['name', 'sourceKey']);
+    if (!fullName(member.name) || !hexKey(member.sourceKey) || names.has(member.name.toLowerCase()) || keys.has(member.sourceKey)) reject();
+    names.add(member.name.toLowerCase()); keys.add(member.sourceKey);
+  }
+  if (!lineage.members.some(member => member.name === lineage.representativeMember) || repository.name !== lineage.representativeMember || (lineage.dominantMember !== null && !lineage.members.some(member => member.name === lineage.dominantMember))) reject();
+}
+const representedKeys = repository => repository.lineage?.members?.map(member => member.sourceKey) ?? [repository.sourceKey ?? anonymousKey(repository.id)];
+function completeCollection(envelope) {
+  if (envelope.collection.failed > 0) return false;
+  if ('lineageVersion' in envelope || 'completeness' in envelope) return envelope.completeness?.complete === true;
+  return true; // Legacy snapshots keep their existing validation contract.
+}
+function requireComplete(envelope) {
+  if (!completeCollection(envelope)) throw new Error('Private collection incomplete; retaining durable sanitized metrics');
+}
+function validateCompletenessProof(proof) {
+  exactKeys(proof, ['complete', 'discoveryComplete', 'expectedRepositories', 'scannedRepositories', 'missingMembers', 'failed']);
+  if (typeof proof.complete !== 'boolean' || typeof proof.discoveryComplete !== 'boolean' || !['expectedRepositories', 'scannedRepositories', 'missingMembers', 'failed'].every(key => integer(proof[key])) || proof.scannedRepositories > proof.expectedRepositories) reject();
+  if (proof.complete && (!proof.discoveryComplete || proof.expectedRepositories !== proof.scannedRepositories || proof.missingMembers !== 0 || proof.failed !== 0)) reject();
+}
+function matchingLineage(publicStats, envelope) {
+  if (publicStats.lineageVersion !== undefined || envelope.lineageVersion !== undefined) {
+    if (!hexKey(publicStats.lineageVersion) || publicStats.lineageVersion !== envelope.lineageVersion) throw new Error('Lineage version mismatch; fresh sources must use the same configuration.');
+  }
+}
+
 export function validatePrivateMetrics(envelope) {
-  exactKeys(envelope, ['schemaVersion', 'generatedAt', 'rulesVersion', 'source', 'collection', 'repositories', ...('datasetEpoch' in envelope ? ['datasetEpoch'] : []), ...('archivedRepositoryKeys' in envelope ? ['archivedRepositoryKeys'] : [])]);
+  exactKeys(envelope, ['schemaVersion', 'generatedAt', 'rulesVersion', 'source', 'collection', 'repositories', ...('datasetEpoch' in envelope ? ['datasetEpoch'] : []), ...('archivedRepositoryKeys' in envelope ? ['archivedRepositoryKeys'] : []), ...('lineageVersion' in envelope ? ['lineageVersion'] : []), ...('completeness' in envelope ? ['completeness'] : [])]);
+  if ('lineageVersion' in envelope && !hexKey(envelope.lineageVersion)) reject();
   if ('datasetEpoch' in envelope && !/^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/.test(envelope.datasetEpoch)) reject();
   if ('archivedRepositoryKeys' in envelope && (!Array.isArray(envelope.archivedRepositoryKeys) || !envelope.archivedRepositoryKeys.every(hexKey) || new Set(envelope.archivedRepositoryKeys).size !== envelope.archivedRepositoryKeys.length)) reject();
   exactKeys(envelope.collection, ['repositories', 'failed']);
   if (envelope.schemaVersion !== 1 || !iso(envelope.generatedAt) || !hexKey(envelope.rulesVersion) || !['local', 'github-actions'].includes(envelope.source) || !Array.isArray(envelope.repositories) || !integer(envelope.collection.repositories) || envelope.collection.repositories !== envelope.repositories.length || !integer(envelope.collection.failed) || envelope.collection.failed > envelope.collection.repositories) reject();
-  const seen = new Set();
+  const seen = new Set(), represented = new Set();
   for (const repository of envelope.repositories) {
-    exactKeys(repository, repositoryKeys);
+    exactKeys(repository, [...repositoryKeys, ...('lastCommitDate' in repository ? ['lastCommitDate'] : []), ...('lineage' in repository ? ['lineage'] : [])]);
+    if ('lastCommitDate' in repository && repository.lastCommitDate !== null && !calendarDate(repository.lastCommitDate)) reject();
+    if ('lineage' in repository) validateLineage(repository, envelope.lineageVersion);
     if (!hexKey(repository.sourceKey) || repository.id !== `private-${repository.sourceKey}` || !repositoryName(repository) || seen.has(repository.sourceKey) || repository.visibility !== 'private' || repository.snapshotKind !== 'daily' || repository.url !== null || repository.branch !== null || repository.head !== null || !statuses.has(repository.status) || (repository.lastSuccessAt !== null && !iso(repository.lastSuccessAt)) || !hexKey(repository.rulesVersion) || typeof repository.historyComplete !== 'boolean' || repository.notice !== notice || !integer(repository.skippedFiles) || !Array.isArray(repository.history)) reject();
     if (envelope.archivedRepositoryKeys?.includes(repository.sourceKey)) reject();
     seen.add(repository.sourceKey);
+    for (const key of representedKeys(repository)) {
+      if (represented.has(key) || envelope.archivedRepositoryKeys?.includes(key)) reject();
+      represented.add(key);
+    }
     let previousDay = '';
     for (const snapshot of repository.history) {
       exactKeys(snapshot, ['timestamp', 'metrics', 'languages']);
@@ -54,7 +97,40 @@ export function validatePrivateMetrics(envelope) {
     }
   }
   if (envelope.collection.failed !== envelope.repositories.filter(repository => ['stale', 'inaccessible'].includes(repository.status)).length) reject();
+  if ('completeness' in envelope) {
+    const proof = envelope.completeness;
+    validateCompletenessProof(proof);
+    if (proof.complete && (envelope.collection.failed !== 0 || envelope.repositories.some(repository => !repository.historyComplete || repository.rulesVersion !== envelope.rulesVersion || !['active', 'empty'].includes(repository.status)))) reject();
+  }
   return true;
+}
+
+export function validateCompletePrivateMetrics(envelope) {
+  validatePrivateMetrics(envelope);
+  requireComplete(envelope);
+  return true;
+}
+
+// An external collection is selected explicitly by its sanitized Git blob, not
+// by scan time or by the presence of a previously successful durable snapshot.
+export function validatePrivateSnapshotBlob(bytes, expectedBlobSha) {
+  if (typeof expectedBlobSha !== 'string' || !/^[a-f0-9]{40}$/.test(expectedBlobSha) || !(Buffer.isBuffer(bytes) || typeof bytes === 'string')) throw new Error('Invalid external private snapshot blob selection.');
+  const value = Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes, 'utf8');
+  const actual = createHash('sha1').update(`blob ${value.length}\0`).update(value).digest('hex');
+  if (actual !== expectedBlobSha) throw new Error('External private snapshot blob SHA mismatch.');
+  let data;
+  try { data = JSON.parse(value.toString('utf8')); } catch { throw new Error('Invalid external private snapshot.'); }
+  validateCompletePrivateMetrics(data);
+  if (!data.datasetEpoch || !hexKey(data.lineageVersion) || data.completeness?.complete !== true) throw new Error('External private snapshot requires a complete lineage epoch.');
+  return data;
+}
+
+export function validateExternalPrivateMetrics(bytes, publicStats, expectedBlobSha) {
+  const data = validatePrivateSnapshotBlob(bytes, expectedBlobSha);
+  if (!publicStats.datasetEpoch || data.datasetEpoch !== publicStats.datasetEpoch) throw new Error('External private snapshot dataset epoch mismatch.');
+  matchingLineage(publicStats, data);
+  if (data.rulesVersion !== publicStats.rules?.version) throw new Error('External private snapshot rules version mismatch.');
+  return data;
 }
 
 // This is an explicit transition, never an epoch relabel or a fresh collection.
@@ -78,9 +154,21 @@ export function validateRetainedPrivateBaseline(baseline, targetEpoch) {
   return true;
 }
 
-export function mergePrivateMetrics(publicStats, envelope, {retainedBaseline} = {}) {
+export function mergePrivateMetrics(publicStats, envelope, {retainedBaseline, privateStatus, externalPrivateBlobSha, privateBytes} = {}) {
+  if (privateStatus !== undefined && !['available', 'stale', 'not-configured'].includes(privateStatus)) throw new Error('Invalid current private attempt status');
+  // A newly scoped lineage snapshot is not evidence of a current attempt just
+  // because a caller found it on disk. Legacy pre-lineage reads remain compatible.
+  if (privateStatus === undefined && (publicStats?.lineageVersion !== undefined || envelope?.lineageVersion !== undefined)) privateStatus = 'not-configured';
+  if (externalPrivateBlobSha) {
+    const verified = validateExternalPrivateMetrics(privateBytes, publicStats, externalPrivateBlobSha);
+    if (JSON.stringify(verified) !== JSON.stringify(envelope) || retainedBaseline) throw new Error('External private snapshot does not match merge input.');
+    privateStatus = 'external-verified';
+  }
+  const currentAttemptUnproven = privateStatus !== undefined && !['available', 'external-verified'].includes(privateStatus);
   validatePrivateMetrics(envelope);
   if (publicStats?.schemaVersion !== 1 || !Array.isArray(publicStats.repositories) || typeof publicStats.rules?.version !== 'string') throw new Error('Invalid public dataset');
+  matchingLineage(publicStats, envelope);
+  if (retainedBaseline && (publicStats.lineageVersion !== undefined || envelope.lineageVersion !== undefined)) throw new Error('Lineage rebuild cannot adopt retained legacy metrics.');
   if (retainedBaseline) {
     validateRetainedPrivateBaseline(retainedBaseline, publicStats.datasetEpoch);
     if (!publicStats.datasetEpoch || JSON.stringify(envelope) !== JSON.stringify(retainedBaseline.metrics)) reject();
@@ -91,8 +179,9 @@ export function mergePrivateMetrics(publicStats, envelope, {retainedBaseline} = 
   if (retainedBaseline) for (const repository of privateData.repositories) repository.dataFreshness = 'retained-private';
   const current = repository => repository.status === 'active' && (repository.rulesVersion === data.rules.version || (repository.visibility === 'private' && repository.dataFreshness === 'retained-private'));
   const archivedKeys = new Set([...(envelope.archivedRepositoryKeys ?? []), ...(retainedBaseline?.scope.archivedRepositoryKeys ?? [])]);
-  const publicRepositories = data.repositories.filter(repository => repository.status !== 'archived' && !archivedKeys.has(anonymousKey(repository.id)) && repository.visibility !== 'private' && !repository.id.startsWith('private-'));
-  const publicKeys = new Set(publicRepositories.filter(current).map(repository => anonymousKey(repository.id)));
+  const groupKeys = new Set(privateData.repositories.filter(repository => repository.lineage && repository.status !== 'archived').flatMap(repository => [repository.sourceKey, ...representedKeys(repository)]));
+  const publicRepositories = data.repositories.filter(repository => repository.status !== 'archived' && !groupKeys.has(anonymousKey(repository.id)) && !representedKeys(repository).some(key => groupKeys.has(key)) && !archivedKeys.has(anonymousKey(repository.id)) && repository.visibility !== 'private' && !repository.id.startsWith('private-'));
+  const publicKeys = new Set(publicRepositories.filter(current).flatMap(repository => [anonymousKey(repository.id), ...representedKeys(repository)]));
   const privateRepositories = privateData.repositories.filter(repository => repository.status !== 'archived' && !publicKeys.has(repository.sourceKey));
   const privateKeys = new Set(privateRepositories.map(repository => repository.sourceKey));
   data.repositories = [...publicRepositories.filter(repository => !privateKeys.has(anonymousKey(repository.id))), ...privateRepositories];
@@ -105,7 +194,28 @@ export function mergePrivateMetrics(publicStats, envelope, {retainedBaseline} = 
   const privateCount = counted.filter(repository => repository.visibility === 'private').length;
   const snapshots = counted.reduce((sum, repository) => sum + repository.history.length, 0);
   data.summary = {...total, repositories: counted.length, publicRepositories: counted.length - privateCount, privateRepositories: privateCount, commits: snapshots, snapshots};
-  data.publication = {privateRepositories: privateRepositories.length, privateUpdatedAt: envelope.generatedAt, privateSource: envelope.source, privateStatus: envelope.collection.failed > 0 || privateRepositories.some(repository => repository.rulesVersion !== data.rules.version || ['stale', 'inaccessible'].includes(repository.status)) ? 'stale' : 'available'};
+  data.publication = {privateRepositories: privateRepositories.length, privateUpdatedAt: envelope.generatedAt, privateSource: envelope.source, privateStatus: currentAttemptUnproven || !completeCollection(envelope) || privateRepositories.some(repository => repository.rulesVersion !== data.rules.version || ['stale', 'inaccessible'].includes(repository.status)) ? 'stale' : 'available'};
+  if (data.lineageVersion !== undefined || data.completeness !== undefined || envelope.completeness !== undefined) {
+    const publicProof = data.completeness ?? null;
+    const snapshotProof = privateData.completeness ?? null;
+    // A durable snapshot proves its own successful run, never a later failed,
+    // canceled, unavailable or rejected attempt. Keep its proof as provenance;
+    // unknown current scans are null rather than invented zero-error counts.
+    const privateProof = currentAttemptUnproven ? null : snapshotProof;
+    data.publication.privateSnapshotCompleteness = snapshotProof;
+    if (publicProof !== null) validateCompletenessProof(publicProof);
+    data.publication.publicCompleteness = publicProof;
+    data.publication.privateCompleteness = privateProof;
+    // These are source-scan tasks, not unique repository or folded-group counts:
+    // public members scanned by both jobs intentionally contribute twice.
+    data.completeness = {
+      complete: publicProof?.complete === true && privateProof?.complete === true,
+      discoveryComplete: publicProof?.discoveryComplete === true && privateProof?.discoveryComplete === true,
+      ...Object.fromEntries(['expectedRepositories', 'scannedRepositories', 'missingMembers', 'failed'].map(key => [key, (publicProof?.[key] ?? 0) + (privateProof?.[key] ?? 0)])),
+    };
+  }
+  if (privateStatus !== undefined) data.publication.privateAttemptStatus = privateStatus;
+  if (externalPrivateBlobSha) data.publication.privateSnapshotBlobSha = externalPrivateBlobSha;
   if (retainedBaseline) Object.assign(data.publication, {
     privateStatus: 'retained', privateDatasetEpoch: retainedBaseline.sourceEpoch,
     privateRulesVersion: envelope.rulesVersion, privateScopeVerifiedAt: retainedBaseline.scope.verifiedAt,
@@ -118,7 +228,9 @@ export function mergePrivateMetrics(publicStats, envelope, {retainedBaseline} = 
 export function validatePrivateMetricsReplacement(previous, next, publicStats, {resetEpoch, preserveScope = false} = {}) {
   validatePrivateMetrics(previous);
   validatePrivateMetrics(next);
-  if (next.collection.failed > 0) throw new Error('Private collection incomplete; retaining durable sanitized metrics');
+  requireComplete(next);
+  if (publicStats) matchingLineage(publicStats, next);
+  if (previous.lineageVersion !== next.lineageVersion && previous.datasetEpoch === next.datasetEpoch) throw new Error('Lineage configuration changed; a new dataset epoch is required.');
   if (previous.datasetEpoch !== next.datasetEpoch) {
     if (!resetEpoch || resetEpoch !== next.datasetEpoch) throw new Error('Dataset epoch mismatch; explicit reset required.');
     if (!preserveScope) return true;
@@ -129,10 +241,10 @@ export function validatePrivateMetricsReplacement(previous, next, publicStats, {
     const replacement = nextByKey.get(repository.sourceKey);
     if (replacement && repository.lastSuccessAt !== null && (replacement.lastSuccessAt === null || timeKey(replacement.lastSuccessAt) < timeKey(repository.lastSuccessAt))) throw new Error('Private repository success time is older than durable metrics; retaining previous sanitized metrics.');
   }
-  const available = new Set(next.repositories.map(repository => repository.sourceKey));
-  const publicKeys = new Set((publicStats?.repositories ?? []).filter(repository => repository.visibility !== 'private' && !String(repository.id).startsWith('private-') && repository.status === 'active' && repository.rulesVersion === next.rulesVersion && repository.rulesVersion === publicStats.rules?.version).map(repository => anonymousKey(repository.id)));
+  const available = new Set(next.repositories.flatMap(representedKeys));
+  const publicKeys = new Set((publicStats?.repositories ?? []).filter(repository => repository.visibility !== 'private' && !String(repository.id).startsWith('private-') && repository.status === 'active' && repository.rulesVersion === next.rulesVersion && repository.rulesVersion === publicStats.rules?.version).flatMap(repository => [anonymousKey(repository.id), ...representedKeys(repository)]));
   // 无状态 CI 无法区分权限缩小和仓库消失；只有已证实转公开时才能移除匿名记录。
-  if (previous.repositories.some(repository => !available.has(repository.sourceKey) && !publicKeys.has(repository.sourceKey) && !next.archivedRepositoryKeys?.includes(repository.sourceKey))) throw new Error('Private repository scope decreased; retaining previous sanitized metrics.');
+  if (previous.repositories.flatMap(representedKeys).some(key => !available.has(key) && !publicKeys.has(key) && !next.archivedRepositoryKeys?.includes(key))) throw new Error('Private repository scope decreased; retaining previous sanitized metrics.');
   return true;
 }
 
@@ -140,8 +252,9 @@ export async function adoptPrivateMetrics(filename, candidateFilename, publicFil
   const bytes = await readFile(candidateFilename, 'utf8');
   const next = JSON.parse(bytes);
   validatePrivateMetrics(next);
-  if (next.collection.failed > 0) throw new Error('Private collection incomplete; retaining durable sanitized metrics');
+  requireComplete(next);
   const publicStats = JSON.parse(await readFile(publicFilename, 'utf8'));
+  matchingLineage(publicStats, next);
   if (publicStats.datasetEpoch !== next.datasetEpoch) throw new Error('Dataset epoch mismatch; refusing private adoption.');
   let previousBytes;
   try {
@@ -178,7 +291,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       if (command !== 'validate' || publicFilename || (argument && argument !== '--complete')) throw new Error('Invalid metrics arguments');
       const data = JSON.parse(await readFile(filename, 'utf8'));
       validatePrivateMetrics(data);
-      if (argument === '--complete' && data.collection.failed > 0) throw new Error('Private collection incomplete');
+      if (argument === '--complete') requireComplete(data);
       console.log('Validated sanitized private metrics.');
     }
   } catch {

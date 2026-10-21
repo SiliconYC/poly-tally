@@ -7,6 +7,11 @@ on:
     # UTC 01:17 / 13:17 = 上海时间 09:17 / 21:17。
     - cron: '17 1,13 * * *'
   workflow_dispatch:
+    inputs:
+      external_private_blob_sha:
+        description: 'Explicit sanitized tally-state/private-metrics.json Git blob SHA for this publication (40 lowercase hex)'
+        required: false
+        type: string
 
 concurrency:
   group: poly-tally-publish
@@ -16,10 +21,10 @@ permissions:
   contents: read
 
 # Bump only for an explicitly requested full baseline rebuild. No prior epoch
-# checkpoint/cache may enter the new computation. An explicitly audited retained
-# private baseline may remain visible, labeled with its original epoch and time.
+# checkpoint/cache or retained private baseline may enter the new computation.
+# Missing private authorization keeps the new lineage epoch explicitly incomplete.
 env:
-  POLY_TALLY_DATASET_EPOCH: active-default-branches-2026-10-21-v2
+  POLY_TALLY_DATASET_EPOCH: source-only-lineage-2026-10-21-v1
 
 jobs:
   private:
@@ -33,12 +38,16 @@ jobs:
         id: credential
         env:
           READ_TOKEN: ${{ secrets.POLY_TALLY_READ_TOKEN }}
+          POLY_TALLY_EXTERNAL_PRIVATE_BLOB_SHA: ${{ github.event_name == 'workflow_dispatch' && inputs.external_private_blob_sha || '' }}
         run: |
-          if [ -n "$READ_TOKEN" ]; then
+          if [ -n "$POLY_TALLY_EXTERNAL_PRIVATE_BLOB_SHA" ]; then
+            echo 'configured=false' >> "$GITHUB_OUTPUT"
+            echo 'Explicit external snapshot selected; exact bytes and current contracts will be verified before publication.'
+          elif [ -n "$READ_TOKEN" ]; then
             echo 'configured=true' >> "$GITHUB_OUTPUT"
           else
             echo 'configured=false' >> "$GITHUB_OUTPUT"
-            echo 'No private source token; use the audited retained private baseline if available, without claiming a rebuild.'
+            echo 'No private source token; lineage rebuild remains incomplete. Old snapshots cannot enter this epoch.'
           fi
       - uses: actions/checkout@v4
         if: steps.credential.outputs.configured == 'true'
@@ -76,7 +85,7 @@ jobs:
           else
             echo 'available=false' >> "$GITHUB_OUTPUT"
             echo 'status=stale' >> "$GITHUB_OUTPUT"
-            echo '::warning::Private collection incomplete; retain a current-epoch snapshot or the explicit audited private baseline.'
+            echo '::warning::Private collection incomplete; keep only a complete current-epoch snapshot. Lineage rebuild remains pending.'
           fi
       # 私有 Git 对象、SQLite、检查点和诊断日志不能进入 cache 或 artifact。
       - name: Stage only the sanitized private snapshot
@@ -129,6 +138,7 @@ jobs:
         id: restore-state
         env:
           GH_TOKEN: ${{ github.token }}
+          POLY_TALLY_EXTERNAL_PRIVATE_BLOB_SHA: ${{ github.event_name == 'workflow_dispatch' && inputs.external_private_blob_sha || '' }}
         run: node scripts/state.mjs restore .poly-tally/remote-checkpoint.json web/data/private-metrics.json
       - name: Download optional sanitized private candidate
         id: candidate
@@ -158,7 +168,7 @@ jobs:
           python -m poly_tally collect --public-only --refresh --state "$state" "${partial[@]}" --checkpoint .poly-tally/checkpoint.json "${restore[@]}"
       - name: Adopt a complete private snapshot only when its scope is preserved
         id: adopt
-        if: needs.private.outputs.available == 'true' && steps.candidate.outcome == 'success'
+        if: needs.private.outputs.available == 'true' && steps.candidate.outcome == 'success' && (github.event_name != 'workflow_dispatch' || inputs.external_private_blob_sha == '')
         run: |
           if node scripts/metrics.mjs adopt web/data/private-metrics.json "$RUNNER_TEMP/private-candidate/private-metrics.json" web/data/stats.json; then
             echo 'status=available' >> "$GITHUB_OUTPUT"
@@ -166,8 +176,9 @@ jobs:
             echo 'status=stale' >> "$GITHUB_OUTPUT"
             echo '::warning::Private snapshot rejected; retain the previous sanitized snapshot.'
           fi
-      - name: Build dashboard with fresh private metrics or the audited retained baseline
+      - name: Build dashboard with current-epoch metrics; leave incomplete rebuild visibly pending
         env:
+          POLY_TALLY_EXTERNAL_PRIVATE_BLOB_SHA: ${{ github.event_name == 'workflow_dispatch' && inputs.external_private_blob_sha || '' }}
           PRIVATE_JOB_RESULT: ${{ needs.private.result }}
           PRIVATE_SCAN_STATUS: ${{ needs.private.outputs.status }}
           PRIVATE_CANDIDATE_AVAILABLE: ${{ needs.private.outputs.available }}

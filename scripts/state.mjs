@@ -3,7 +3,7 @@ import {execFileSync} from 'node:child_process';
 import {appendFile, mkdir, readFile, writeFile, rm} from 'node:fs/promises';
 import {dirname} from 'node:path';
 import {pathToFileURL} from 'node:url';
-import {validatePrivateMetrics, validatePrivateMetricsReplacement} from './metrics.mjs';
+import {validatePrivateMetrics, validatePrivateMetricsReplacement, validateCompletePrivateMetrics, validatePrivateSnapshotBlob} from './metrics.mjs';
 
 function privateData(bytes, complete = false) {
   let data;
@@ -13,7 +13,7 @@ function privateData(bytes, complete = false) {
   } catch {
     throw new Error('Refusing invalid sanitized private metrics');
   }
-  if (complete && data.collection.failed > 0) throw new Error('Private collection incomplete; retaining durable sanitized metrics');
+  if (complete) validateCompletePrivateMetrics(data);
   return data;
 }
 function publicData(bytes) {
@@ -44,7 +44,9 @@ function localCredential(repository, env) {
 
 export async function runState(command, filename, privateFilename, {env = process.env, fetcher = fetch, logger = console, gitCredential = false, credentialReader = localCredential} = {}) {
   const epoch = env.POLY_TALLY_DATASET_EPOCH;
+  const externalSha = command === 'restore' ? env.POLY_TALLY_EXTERNAL_PRIVATE_BLOB_SHA : undefined;
   if (epoch && !/^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/.test(epoch)) throw new Error('Invalid dataset epoch');
+  if (externalSha && (!/^[a-f0-9]{40}$/.test(externalSha) || !epoch || !privateFilename)) throw new Error('External private snapshot requires a valid blob SHA, dataset epoch and destination.');
   const repository = env.GITHUB_REPOSITORY;
   if (!repository || !/^[\w.-]+\/[\w.-]+$/.test(repository)) throw new Error('GITHUB_REPOSITORY is required');
   if (!['restore', 'save', 'save-private'].includes(command) || !filename || (command === 'save-private' && privateFilename)) throw new Error('Usage: state.mjs restore|save checkpoint [sanitized-private-file] | save-private sanitized-private-file');
@@ -83,6 +85,7 @@ export async function runState(command, filename, privateFilename, {env = proces
   if (command === 'restore') {
     const checkpoint = entryFor('checkpoint.json');
     const metrics = entryFor('private-metrics.json');
+    if (externalSha && !metrics) throw new Error('Selected external private snapshot is missing from durable state.');
     if (ref && !checkpoint && !metrics) throw new Error('Durable state branch has no checkpoint; refusing to lose collected history');
     const restore = [];
     let publicCurrent = false;
@@ -97,8 +100,11 @@ export async function runState(command, filename, privateFilename, {env = proces
     }
     if (metrics && privateFilename) {
       const bytes = await readBlob(metrics);
-      const data = privateData(bytes, true);
-      if (!epoch || (data.datasetEpoch === epoch && publicCurrent)) {
+      const data = externalSha ? validatePrivateSnapshotBlob(bytes, externalSha) : privateData(bytes, true);
+      if (externalSha && data.datasetEpoch !== epoch) throw new Error('External private snapshot dataset epoch mismatch.');
+      // Explicit byte selection may bootstrap a reset before public collection;
+      // build-site still checks its rules and lineage against the new public run.
+      if (!epoch || (data.datasetEpoch === epoch && (publicCurrent || externalSha))) {
         restore.push({filename: privateFilename, bytes});
         privateCurrent = true;
       }
@@ -122,16 +128,18 @@ export async function runState(command, filename, privateFilename, {env = proces
   checkpoint ??= previousCheckpoint;
   if (epoch) {
     if (checkpoint?.datasetEpoch !== epoch) throw new Error('Current public dataset epoch is required before private publication.');
-    if (previousCheckpoint?.datasetEpoch !== epoch && checkpoint.collection?.failed !== 0) throw new Error('A complete public rebuild is required to initialize the new dataset epoch.');
+    if (previousCheckpoint?.datasetEpoch !== epoch && (checkpoint.collection?.failed !== 0 || (checkpoint.lineageVersion && checkpoint.collection?.completeness?.complete !== true))) throw new Error('A complete public rebuild is required to initialize the new dataset epoch.');
   }
   const changed = [];
+  let privateBlobSha;
   for (const file of files) {
     const entry = entryFor(file.path);
+    if (file.path === 'private-metrics.json') privateBlobSha = entry?.sha;
     const sha = createHash('sha1').update(`blob ${file.bytes.length}\0`).update(file.bytes).digest('hex');
     if (entry?.sha === sha) continue;
     if (entry && file.path === 'private-metrics.json') {
       const previous = privateData(await readBlob(entry), true);
-      const publicStats = checkpoint ? {rules: {version: file.data.rulesVersion}, repositories: checkpoint.repositories} : undefined;
+      const publicStats = checkpoint ? {rules: {version: file.data.rulesVersion}, lineageVersion: checkpoint.lineageVersion, repositories: checkpoint.repositories} : undefined;
       validatePrivateMetricsReplacement(previous, file.data, publicStats, {resetEpoch: epoch});
       // 采集时刻变化不产生数据提交；发布页面仍使用本次实际收到的快照时间。
       if (privateFingerprint(previous) === privateFingerprint(file.data)) continue;
@@ -140,11 +148,12 @@ export async function runState(command, filename, privateFilename, {env = proces
   }
   if (!changed.length) {
     logger.log('No inventory/history/status change; no data commit created.');
-    return;
+    return privateBlobSha ? {privateBlobSha} : {};
   }
   const entries = [];
   for (const file of changed) {
     const blob = await api('/git/blobs', 'POST', {content: file.bytes.toString('base64'), encoding: 'base64'});
+    if (file.path === 'private-metrics.json') privateBlobSha = blob.sha;
     entries.push({path: file.path, mode: '100644', type: 'blob', sha: blob.sha});
   }
   const nextTree = await api('/git/trees', 'POST', {...(commit ? {base_tree: commit.tree.sha} : {}), tree: entries});
@@ -152,6 +161,7 @@ export async function runState(command, filename, privateFilename, {env = proces
   if (ref) await api('/git/refs/heads/tally-state', 'PATCH', {sha: nextCommit.sha, force: false});
   else await api('/git/refs', 'POST', {ref: 'refs/heads/tally-state', sha: nextCommit.sha});
   logger.log('Saved durable public checkpoint and/or sanitized private metrics.');
+  return privateBlobSha ? {privateBlobSha} : {};
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
@@ -161,6 +171,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     const [command, filename, privateFilename, ...extra] = arguments_.filter(argument => argument !== '--git-credential');
     if (extra.length) throw new Error('Unexpected state arguments');
     const result = await runState(command, filename, privateFilename, {gitCredential});
+    if (result?.privateBlobSha) console.log(`private-blob-sha=${result.privateBlobSha}`);
     if (command === 'restore' && process.env.GITHUB_OUTPUT) {
       await appendFile(process.env.GITHUB_OUTPUT, `reset-required=${result.resetRequired}\nprivate-pending=${result.privatePending}\n`);
     }

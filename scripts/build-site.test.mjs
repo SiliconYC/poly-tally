@@ -151,6 +151,43 @@ test('explicit retained baseline restores default private totals and fresh same-
   assert.equal(laterReset.publication.privateRepositories, 0, 'explicit v2 retention cannot silently cross into a later reset');
 });
 
+test('lineage epoch cannot build from an unproved private scan with zero visible failures', async t => {
+  const proof = {complete:false, discoveryComplete:false, expectedRepositories:0, scannedRepositories:0, missingMembers:0, failed:0};
+  const root = await fixture(t, {...envelope, lineageVersion:'abcdef0123456789', completeness:proof});
+  await writeFile(join(root, 'web/data/stats.json'), JSON.stringify({...publicStats, lineageVersion:'abcdef0123456789', completeness:{...proof, complete:true, discoveryComplete:true}}));
+  const {buildSite} = await import('./build-site.mjs');
+  await assert.rejects(buildSite({root, logger:{log(){}}}), /incomplete/i);
+});
+
+test('lineage epoch public-only build is explicitly incomplete while private rebuild awaits access', async t => {
+  const root = await fixture(t);
+  const proof = {complete:true, discoveryComplete:true, expectedRepositories:0, scannedRepositories:0, missingMembers:0, failed:0};
+  await writeFile(join(root, 'web/data/stats.json'), JSON.stringify({...publicStats, datasetEpoch:'lineage-test', lineageVersion:'abcdef0123456789', completeness:proof}));
+  const {buildSite} = await import('./build-site.mjs');
+  const result = await buildSite({root, logger:{log(){}}});
+  assert.equal(result.publication.privateStatus, 'pending-rebuild');
+  assert.equal(result.completeness.complete, false);
+});
+
+test('failed or unconfigured current job retains same-epoch values but withdraws current completeness', async t => {
+  const proof = {complete:true, discoveryComplete:true, expectedRepositories:0, scannedRepositories:0, missingMembers:0, failed:0};
+  const common = {datasetEpoch:'lineage-attempt-v1', lineageVersion:'abcdef0123456789', completeness:proof};
+  for (const privateStatus of ['stale','not-configured']) {
+    const candidate = {...envelope, ...common};
+    const root = await fixture(t, candidate);
+    await writeFile(join(root,'web/data/stats.json'), JSON.stringify({...publicStats,...common}));
+    const {buildSite} = await import('./build-site.mjs');
+    const result = await buildSite({root,privateStatus,logger:{log(){}}});
+    assert.equal(result.completeness.complete,false);
+    assert.equal(result.publication.privateStatus,'stale');
+    assert.equal(result.publication.privateAttemptStatus,privateStatus);
+    assert.equal(result.publication.privateCompleteness,null);
+    assert.deepEqual(result.publication.privateSnapshotCompleteness,proof);
+    assert.deepEqual(JSON.parse(await readFile(join(root,'web/data/private-metrics.json'))),candidate,'durable source evidence is not rewritten');
+    assert.equal(JSON.parse(await readFile(join(root,'site/data/stats.json'))).completeness.complete,false);
+  }
+});
+
 test('nested preview HTML rewrites its own assets and parent imports while preserving synthetic data', async t => {
   const root = await fixture(t);
   await mkdir(join(root, 'web/qa-lineage/data'), {recursive:true});
@@ -177,4 +214,42 @@ test('nested preview HTML rewrites its own assets and parent imports while prese
   assert.deepEqual(JSON.parse(await readFile(join(root,'site/data/stats.json'))),publicStats);
   assert.equal(await readFile(join(root,'web/qa-lineage/index.html'),'utf8'),nested);
   assert.equal(await readFile(join(root,'site/index.html'),'utf8'),'<main>Dashboard</main>');
+});
+
+test('build verifies explicit external bytes before treating no-token snapshot as current', async t => {
+  const {createHash} = await import('node:crypto');
+  const {buildSite} = await import('./build-site.mjs');
+  const proof = {complete:true, discoveryComplete:true, expectedRepositories:0, scannedRepositories:0, missingMembers:0, failed:0};
+  const common = {datasetEpoch:'source-only-external-test', lineageVersion:'abcdef0123456789', completeness:proof};
+  const candidate = {...envelope, ...common};
+  const root = await fixture(t, candidate);
+  await writeFile(join(root,'web/data/stats.json'), JSON.stringify({...publicStats,...common}));
+  const bytes = await readFile(join(root,'web/data/private-metrics.json'));
+  const externalPrivateBlobSha = createHash('sha1').update(`blob ${bytes.length}\0`).update(bytes).digest('hex');
+  const result = await buildSite({root,privateStatus:'not-configured',externalPrivateBlobSha,logger:{log(){}}});
+  assert.equal(result.completeness.complete,true);
+  assert.equal(result.publication.privateAttemptStatus,'external-verified');
+  assert.equal(result.publication.privateSnapshotBlobSha,externalPrivateBlobSha);
+  const safe = await readFile(join(root,'site/data/stats.json'));
+  await assert.rejects(buildSite({root,privateStatus:'not-configured',externalPrivateBlobSha:'0'.repeat(40),logger:{log(){}}}), /blob|external/i);
+  assert.deepEqual(await readFile(join(root,'site/data/stats.json')),safe,'bad selection never replaces existing site');
+  await rm(join(root,'web/data/private-metrics.json'));
+  await assert.rejects(buildSite({root,externalPrivateBlobSha,logger:{log(){}}}), /missing|external/i);
+});
+
+test('build cannot self-assert external verification through a status environment override', async t => {
+  const root = await fixture(t,envelope);
+  const {buildSite} = await import('./build-site.mjs');
+  await assert.rejects(buildSite({root,privateStatus:'external-verified',logger:{log(){}}}), /status/i);
+});
+
+test('local lineage build without a selected snapshot or current job proof remains incomplete', async t => {
+  const proof = {complete:true,discoveryComplete:true,expectedRepositories:0,scannedRepositories:0,missingMembers:0,failed:0};
+  const common = {datasetEpoch:'source-only-local-test',lineageVersion:'abcdef0123456789',completeness:proof};
+  const root = await fixture(t, {...envelope,...common});
+  await writeFile(join(root,'web/data/stats.json'),JSON.stringify({...publicStats,...common}));
+  const {buildSite} = await import('./build-site.mjs');
+  const result = await buildSite({root,logger:{log(){}}});
+  assert.equal(result.completeness.complete,false);
+  assert.equal(result.publication.privateAttemptStatus,'not-configured');
 });

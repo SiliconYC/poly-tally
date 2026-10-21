@@ -2,7 +2,7 @@ import {cp, mkdir, rm, writeFile, readFile, readdir} from 'node:fs/promises';
 import {createHash} from 'node:crypto';
 import {resolve, relative, dirname, extname} from 'node:path';
 import {pathToFileURL} from 'node:url';
-import {mergePrivateMetrics, validatePrivateMetrics, validateRetainedPrivateBaseline, validatePrivateMetricsReplacement} from './metrics.mjs';
+import {mergePrivateMetrics, validatePrivateMetrics, validateCompletePrivateMetrics, validateRetainedPrivateBaseline, validatePrivateMetricsReplacement} from './metrics.mjs';
 
 // A release-wide content digest keeps the HTML, CSS and complete ESM graph together.
 // Hash filenames (rather than reload instructions) invalidate browser/CDN asset caches.
@@ -46,15 +46,16 @@ async function versionAssets(site) {
   for (const page of htmlPages) await writeFile(page, rewrite(await readFile(page, 'utf8'), page));
 }
 
-export async function buildSite({root = resolve(import.meta.dirname, '..'), privateStatus = process.env.POLY_TALLY_PRIVATE_STATUS, logger = console} = {}) {
+export async function buildSite({root = resolve(import.meta.dirname, '..'), privateStatus = process.env.POLY_TALLY_PRIVATE_STATUS, externalPrivateBlobSha = process.env.POLY_TALLY_EXTERNAL_PRIVATE_BLOB_SHA, logger = console} = {}) {
   let data = JSON.parse(await readFile(resolve(root, 'web/data/stats.json'), 'utf8'));
   if (data.schemaVersion !== 1 || !Array.isArray(data.repositories)) throw new Error('Invalid public dataset');
   let privateBytes;
   try {
-    privateBytes = await readFile(resolve(root, 'web/data/private-metrics.json'), 'utf8');
+    privateBytes = await readFile(resolve(root, 'web/data/private-metrics.json'));
   } catch (error) {
     if (error.code !== 'ENOENT') throw error;
   }
+  if (externalPrivateBlobSha && privateBytes === undefined) throw new Error('Selected external private snapshot is missing; refusing site build.');
   let retainedBaseline;
   try {
     retainedBaseline = JSON.parse(await readFile(resolve(root, 'web/data/retained-private-baseline.json'), 'utf8'));
@@ -72,14 +73,18 @@ export async function buildSite({root = resolve(import.meta.dirname, '..'), priv
     } catch {
       throw new Error('Invalid sanitized private metrics; refusing site build.');
     }
-    if (privateData.collection.failed > 0) throw new Error('Incomplete private collection; retain a previous complete sanitized snapshot.');
+    validateCompletePrivateMetrics(privateData);
     if (retainedBaseline) validatePrivateMetricsReplacement(retainedBaseline.metrics, privateData, data, {resetEpoch: data.datasetEpoch, preserveScope: true});
-    data = mergePrivateMetrics(data, privateData);
-    if (privateStatus === 'stale') data.publication.privateStatus = 'stale';
+    data = mergePrivateMetrics(data, privateData, {privateStatus, externalPrivateBlobSha, privateBytes});
   }
   if (privateBytes === undefined && retainedBaseline) data = mergePrivateMetrics(data, retainedBaseline.metrics, {retainedBaseline});
   if (data.datasetEpoch && privateBytes === undefined && !retainedBaseline) {
     data.publication = {privateRepositories: 0, privateUpdatedAt: null, privateSource: null, privateStatus: 'pending-rebuild'};
+    if (data.lineageVersion) {
+      data.publication.publicCompleteness = structuredClone(data.completeness ?? null);
+      data.publication.privateCompleteness = null;
+      data.completeness = {...data.completeness, complete: false};
+    }
   }
   await rm(resolve(root, 'site'), {recursive: true, force: true});
   await mkdir(resolve(root, 'site'), {recursive: true});
