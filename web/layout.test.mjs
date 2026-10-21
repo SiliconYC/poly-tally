@@ -30,3 +30,10 @@ test('progressive disclosure retains chart controls and statistical caveats', ()
   assert.match(html, /class="skip-link" href="#main"/);
   assert.ok(html.indexOf('id="stat-total"') < html.indexOf('class="metrics-grid"'), 'primary metric precedes the secondary strip');
 });
+
+
+test('trend plot precedes secondary metric strip to prioritize the first viewport', () => {
+  assert.ok(html.indexOf('id="chart"') < html.indexOf('class="metrics-grid"'));
+  assert.ok(html.indexOf('class="chart-bottom"') < html.indexOf('class="metrics-grid"'));
+  assert.ok(html.indexOf('class="metrics-grid"') < html.indexOf('class="legend-details"'));
+});
