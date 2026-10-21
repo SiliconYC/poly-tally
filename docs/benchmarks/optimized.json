@@ -1,0 +1,469 @@
+{
+  "caveats": [
+    "No network transport measured. True network-cold cost is unknown.",
+    "local-cold-stage copies local raw JSON into an empty directory; OS page cache is not flushed.",
+    "incremental retains prefix statistics, but reopens and revalidates raw inputs in a fresh process; prefix setup is unmeasured.",
+    "Inputs are synthetic high-reuse history, not a claim about all repositories."
+  ],
+  "codeRoot": "/workspace/shared/poly-tally-lineage",
+  "codeSha256": "ac600078025bbe97b2c9fb30092dae51d158d17c42b705387b038b4199fee66b",
+  "equivalentAcrossScenarios": true,
+  "fixture": {
+    "commits": 500,
+    "filesAtHead": 2001,
+    "groupSize": 20,
+    "identity": "SHA-1-valid Git tree/blob bytes and deterministic synthetic API commit metadata; not user repository data",
+    "kind": "synthetic-high-reuse-history",
+    "rawJsonBytes": 5309012,
+    "rulesSha256": "4342e930bdbe205a22726904e3f89b11b1e6b0337f5ce89d1baa33eb1ed14f8e",
+    "stableBlobPool": 100,
+    "stableFiles": 2000,
+    "uniqueObjects": {
+      "blobs": 600,
+      "commits": 500,
+      "trees": 1005
+    },
+    "uniqueSourceBytes": 21260
+  },
+  "label": "merkle-compiled-rules",
+  "measurementNotes": [
+    "Final optimized measurement: three repeats per scenario, fresh process for each measured scenario, no other benchmark/profile scheduled concurrently.",
+    "Both versions consumed the identical fixed synthetic object bundle; all full-state digests agree after excluding only lastSuccessAt."
+  ],
+  "measurements": [
+    {
+      "auditCounts": {
+        "apiCommits": 500,
+        "verifiedBlobs": 600,
+        "verifiedTrees": 1005
+      },
+      "codeSha256": "ac600078025bbe97b2c9fb30092dae51d158d17c42b705387b038b4199fee66b",
+      "databaseRows": {
+        "blobs": 600,
+        "repositories": 1
+      },
+      "engineCounters": {
+        "cacheHits": 1900,
+        "objectReads": 600,
+        "parsedBlobs": 600,
+        "recomputedCommits": 500,
+        "skippedBlobs": 0
+      },
+      "outputSha256": "5955aaa99029b30ba846203af4b9c363b58af33351d2ff654720804cd12acfd5",
+      "peakRssKiB": 45568,
+      "repeat": 0,
+      "scenario": "local-cold-stage",
+      "snapshotCount": 500,
+      "timingsSeconds": {
+        "rawStage": 0.062326952000148594,
+        "replay": 0.2860584910013131,
+        "total": 0.8198531710004318,
+        "validation": 0.46368066300055943
+      },
+      "totalCounts": {
+        "pathChecks": 5000,
+        "rawReads": {
+          "blobs": 1200,
+          "commits": 500,
+          "manifest": 1,
+          "trees": 1005
+        }
+      },
+      "validationCounts": {
+        "pathChecks": 2500,
+        "rawReads": {
+          "blobs": 600,
+          "commits": 500,
+          "manifest": 1,
+          "trees": 1005
+        }
+      }
+    },
+    {
+      "auditCounts": {
+        "apiCommits": 500,
+        "verifiedBlobs": 600,
+        "verifiedTrees": 1005
+      },
+      "codeSha256": "ac600078025bbe97b2c9fb30092dae51d158d17c42b705387b038b4199fee66b",
+      "databaseRows": {
+        "blobs": 600,
+        "repositories": 1
+      },
+      "engineCounters": {
+        "cacheHits": 1900,
+        "objectReads": 600,
+        "parsedBlobs": 600,
+        "recomputedCommits": 500,
+        "skippedBlobs": 0
+      },
+      "outputSha256": "5955aaa99029b30ba846203af4b9c363b58af33351d2ff654720804cd12acfd5",
+      "peakRssKiB": 45548,
+      "repeat": 0,
+      "scenario": "raw-present-stats-empty",
+      "snapshotCount": 500,
+      "timingsSeconds": {
+        "rawStage": 0.0,
+        "replay": 0.3126456429999962,
+        "total": 0.7870582850009669,
+        "validation": 0.4662071150014526
+      },
+      "totalCounts": {
+        "pathChecks": 5000,
+        "rawReads": {
+          "blobs": 1200,
+          "commits": 500,
+          "manifest": 1,
+          "trees": 1005
+        }
+      },
+      "validationCounts": {
+        "pathChecks": 2500,
+        "rawReads": {
+          "blobs": 600,
+          "commits": 500,
+          "manifest": 1,
+          "trees": 1005
+        }
+      }
+    },
+    {
+      "auditCounts": {
+        "apiCommits": 500,
+        "verifiedBlobs": 600,
+        "verifiedTrees": 1005
+      },
+      "codeSha256": "ac600078025bbe97b2c9fb30092dae51d158d17c42b705387b038b4199fee66b",
+      "databaseRows": {
+        "blobs": 600,
+        "repositories": 1
+      },
+      "engineCounters": {
+        "cacheHits": 0,
+        "objectReads": 1,
+        "parsedBlobs": 1,
+        "recomputedCommits": 1,
+        "skippedBlobs": 0
+      },
+      "outputSha256": "5955aaa99029b30ba846203af4b9c363b58af33351d2ff654720804cd12acfd5",
+      "peakRssKiB": 43816,
+      "repeat": 0,
+      "scenario": "incremental",
+      "snapshotCount": 500,
+      "timingsSeconds": {
+        "rawStage": 0.0,
+        "replay": 0.0321087529991928,
+        "total": 0.5790692470000067,
+        "validation": 0.5359332930020173
+      },
+      "totalCounts": {
+        "pathChecks": 2501,
+        "rawReads": {
+          "blobs": 601,
+          "commits": 500,
+          "manifest": 1,
+          "trees": 1005
+        }
+      },
+      "validationCounts": {
+        "pathChecks": 2500,
+        "rawReads": {
+          "blobs": 600,
+          "commits": 500,
+          "manifest": 1,
+          "trees": 1005
+        }
+      }
+    },
+    {
+      "auditCounts": {
+        "apiCommits": 500,
+        "verifiedBlobs": 600,
+        "verifiedTrees": 1005
+      },
+      "codeSha256": "ac600078025bbe97b2c9fb30092dae51d158d17c42b705387b038b4199fee66b",
+      "databaseRows": {
+        "blobs": 600,
+        "repositories": 1
+      },
+      "engineCounters": {
+        "cacheHits": 1900,
+        "objectReads": 600,
+        "parsedBlobs": 600,
+        "recomputedCommits": 500,
+        "skippedBlobs": 0
+      },
+      "outputSha256": "5955aaa99029b30ba846203af4b9c363b58af33351d2ff654720804cd12acfd5",
+      "peakRssKiB": 45568,
+      "repeat": 1,
+      "scenario": "local-cold-stage",
+      "snapshotCount": 500,
+      "timingsSeconds": {
+        "rawStage": 0.05725565800094046,
+        "replay": 0.3189524759982305,
+        "total": 0.8407291599978635,
+        "validation": 0.4573300969968841
+      },
+      "totalCounts": {
+        "pathChecks": 5000,
+        "rawReads": {
+          "blobs": 1200,
+          "commits": 500,
+          "manifest": 1,
+          "trees": 1005
+        }
+      },
+      "validationCounts": {
+        "pathChecks": 2500,
+        "rawReads": {
+          "blobs": 600,
+          "commits": 500,
+          "manifest": 1,
+          "trees": 1005
+        }
+      }
+    },
+    {
+      "auditCounts": {
+        "apiCommits": 500,
+        "verifiedBlobs": 600,
+        "verifiedTrees": 1005
+      },
+      "codeSha256": "ac600078025bbe97b2c9fb30092dae51d158d17c42b705387b038b4199fee66b",
+      "databaseRows": {
+        "blobs": 600,
+        "repositories": 1
+      },
+      "engineCounters": {
+        "cacheHits": 1900,
+        "objectReads": 600,
+        "parsedBlobs": 600,
+        "recomputedCommits": 500,
+        "skippedBlobs": 0
+      },
+      "outputSha256": "5955aaa99029b30ba846203af4b9c363b58af33351d2ff654720804cd12acfd5",
+      "peakRssKiB": 45544,
+      "repeat": 1,
+      "scenario": "raw-present-stats-empty",
+      "snapshotCount": 500,
+      "timingsSeconds": {
+        "rawStage": 0.0,
+        "replay": 0.3571338029978506,
+        "total": 0.8221306160012318,
+        "validation": 0.4575647149977158
+      },
+      "totalCounts": {
+        "pathChecks": 5000,
+        "rawReads": {
+          "blobs": 1200,
+          "commits": 500,
+          "manifest": 1,
+          "trees": 1005
+        }
+      },
+      "validationCounts": {
+        "pathChecks": 2500,
+        "rawReads": {
+          "blobs": 600,
+          "commits": 500,
+          "manifest": 1,
+          "trees": 1005
+        }
+      }
+    },
+    {
+      "auditCounts": {
+        "apiCommits": 500,
+        "verifiedBlobs": 600,
+        "verifiedTrees": 1005
+      },
+      "codeSha256": "ac600078025bbe97b2c9fb30092dae51d158d17c42b705387b038b4199fee66b",
+      "databaseRows": {
+        "blobs": 600,
+        "repositories": 1
+      },
+      "engineCounters": {
+        "cacheHits": 0,
+        "objectReads": 1,
+        "parsedBlobs": 1,
+        "recomputedCommits": 1,
+        "skippedBlobs": 0
+      },
+      "outputSha256": "5955aaa99029b30ba846203af4b9c363b58af33351d2ff654720804cd12acfd5",
+      "peakRssKiB": 43832,
+      "repeat": 1,
+      "scenario": "incremental",
+      "snapshotCount": 500,
+      "timingsSeconds": {
+        "rawStage": 0.0,
+        "replay": 0.033474809999461286,
+        "total": 0.5040767650025373,
+        "validation": 0.4628496199984511
+      },
+      "totalCounts": {
+        "pathChecks": 2501,
+        "rawReads": {
+          "blobs": 601,
+          "commits": 500,
+          "manifest": 1,
+          "trees": 1005
+        }
+      },
+      "validationCounts": {
+        "pathChecks": 2500,
+        "rawReads": {
+          "blobs": 600,
+          "commits": 500,
+          "manifest": 1,
+          "trees": 1005
+        }
+      }
+    },
+    {
+      "auditCounts": {
+        "apiCommits": 500,
+        "verifiedBlobs": 600,
+        "verifiedTrees": 1005
+      },
+      "codeSha256": "ac600078025bbe97b2c9fb30092dae51d158d17c42b705387b038b4199fee66b",
+      "databaseRows": {
+        "blobs": 600,
+        "repositories": 1
+      },
+      "engineCounters": {
+        "cacheHits": 1900,
+        "objectReads": 600,
+        "parsedBlobs": 600,
+        "recomputedCommits": 500,
+        "skippedBlobs": 0
+      },
+      "outputSha256": "5955aaa99029b30ba846203af4b9c363b58af33351d2ff654720804cd12acfd5",
+      "peakRssKiB": 45568,
+      "repeat": 2,
+      "scenario": "local-cold-stage",
+      "snapshotCount": 500,
+      "timingsSeconds": {
+        "rawStage": 0.06774719000168261,
+        "replay": 0.29936234100023285,
+        "total": 0.8711716850011726,
+        "validation": 0.4957043979993614
+      },
+      "totalCounts": {
+        "pathChecks": 5000,
+        "rawReads": {
+          "blobs": 1200,
+          "commits": 500,
+          "manifest": 1,
+          "trees": 1005
+        }
+      },
+      "validationCounts": {
+        "pathChecks": 2500,
+        "rawReads": {
+          "blobs": 600,
+          "commits": 500,
+          "manifest": 1,
+          "trees": 1005
+        }
+      }
+    },
+    {
+      "auditCounts": {
+        "apiCommits": 500,
+        "verifiedBlobs": 600,
+        "verifiedTrees": 1005
+      },
+      "codeSha256": "ac600078025bbe97b2c9fb30092dae51d158d17c42b705387b038b4199fee66b",
+      "databaseRows": {
+        "blobs": 600,
+        "repositories": 1
+      },
+      "engineCounters": {
+        "cacheHits": 1900,
+        "objectReads": 600,
+        "parsedBlobs": 600,
+        "recomputedCommits": 500,
+        "skippedBlobs": 0
+      },
+      "outputSha256": "5955aaa99029b30ba846203af4b9c363b58af33351d2ff654720804cd12acfd5",
+      "peakRssKiB": 45540,
+      "repeat": 2,
+      "scenario": "raw-present-stats-empty",
+      "snapshotCount": 500,
+      "timingsSeconds": {
+        "rawStage": 0.0,
+        "replay": 0.3003162519999023,
+        "total": 0.8584216939998441,
+        "validation": 0.5502216540007794
+      },
+      "totalCounts": {
+        "pathChecks": 5000,
+        "rawReads": {
+          "blobs": 1200,
+          "commits": 500,
+          "manifest": 1,
+          "trees": 1005
+        }
+      },
+      "validationCounts": {
+        "pathChecks": 2500,
+        "rawReads": {
+          "blobs": 600,
+          "commits": 500,
+          "manifest": 1,
+          "trees": 1005
+        }
+      }
+    },
+    {
+      "auditCounts": {
+        "apiCommits": 500,
+        "verifiedBlobs": 600,
+        "verifiedTrees": 1005
+      },
+      "codeSha256": "ac600078025bbe97b2c9fb30092dae51d158d17c42b705387b038b4199fee66b",
+      "databaseRows": {
+        "blobs": 600,
+        "repositories": 1
+      },
+      "engineCounters": {
+        "cacheHits": 0,
+        "objectReads": 1,
+        "parsedBlobs": 1,
+        "recomputedCommits": 1,
+        "skippedBlobs": 0
+      },
+      "outputSha256": "5955aaa99029b30ba846203af4b9c363b58af33351d2ff654720804cd12acfd5",
+      "peakRssKiB": 43836,
+      "repeat": 2,
+      "scenario": "incremental",
+      "snapshotCount": 500,
+      "timingsSeconds": {
+        "rawStage": 0.0,
+        "replay": 0.033896745000674855,
+        "total": 0.579476255003101,
+        "validation": 0.5313374229990586
+      },
+      "totalCounts": {
+        "pathChecks": 2501,
+        "rawReads": {
+          "blobs": 601,
+          "commits": 500,
+          "manifest": 1,
+          "trees": 1005
+        }
+      },
+      "validationCounts": {
+        "pathChecks": 2500,
+        "rawReads": {
+          "blobs": 600,
+          "commits": 500,
+          "manifest": 1,
+          "trees": 1005
+        }
+      }
+    }
+  ],
+  "operation": "connector validation + engine sync; excludes fixture creation, export/publication, and interpreter startup",
+  "python": "3.12.14"
+}

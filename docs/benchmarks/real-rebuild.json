@@ -1,0 +1,83 @@
+{
+  "baselineCommit": "3b8151f",
+  "equivalentStateSha256": "b0e65428c2a5284f41b1d934781ded8ac3a6a390b6a72d7871dd803ac75ad489",
+  "fixture": {
+    "commits": 94,
+    "kind": "one-frozen-completed-real-repository",
+    "repositoryIdentity": "intentionally omitted",
+    "storedBlobJsonFiles": 601,
+    "storedDecodedBlobBytes": 5816381,
+    "storedRawJsonBytes": 10146625,
+    "uniqueStoredTrees": 740
+  },
+  "measurementPolicy": [
+    "Each run uses a fresh interpreter and empty SQLite, including empty parser cache.",
+    "No old statistics were imported; raw inputs were frozen from the current completed capture.",
+    "No simultaneous benchmark from this optimization team during these measurements; shared host background activity is uncontrolled.",
+    "OS page cache was not flushed; no network acquisition, export, or publication included.",
+    "Baseline one final run; optimized three final runs. Earlier exploratory runs are not included."
+  ],
+  "measurements": {
+    "baseline": [
+      {
+        "counts": {
+          "cacheHits": 14,
+          "objectReads": 601,
+          "parsedBlobs": 601,
+          "recomputedCommits": 94,
+          "skippedBlobs": 1
+        },
+        "peakRssKiB": 26352,
+        "replaySeconds": 3.35081971499676,
+        "sha256": "b0e65428c2a5284f41b1d934781ded8ac3a6a390b6a72d7871dd803ac75ad489",
+        "totalSeconds": 11.159718153998256,
+        "validationSeconds": 7.808898439001496
+      }
+    ],
+    "optimized": [
+      {
+        "counts": {
+          "cacheHits": 14,
+          "objectReads": 601,
+          "parsedBlobs": 601,
+          "recomputedCommits": 94,
+          "skippedBlobs": 1
+        },
+        "peakRssKiB": 24504,
+        "replaySeconds": 3.416367949997948,
+        "sha256": "b0e65428c2a5284f41b1d934781ded8ac3a6a390b6a72d7871dd803ac75ad489",
+        "totalSeconds": 3.9644026089990803,
+        "validationSeconds": 0.5480346590011322
+      },
+      {
+        "counts": {
+          "cacheHits": 14,
+          "objectReads": 601,
+          "parsedBlobs": 601,
+          "recomputedCommits": 94,
+          "skippedBlobs": 1
+        },
+        "peakRssKiB": 24504,
+        "replaySeconds": 3.342301718003,
+        "sha256": "b0e65428c2a5284f41b1d934781ded8ac3a6a390b6a72d7871dd803ac75ad489",
+        "totalSeconds": 3.8676520389999496,
+        "validationSeconds": 0.5253503209969494
+      },
+      {
+        "counts": {
+          "cacheHits": 14,
+          "objectReads": 601,
+          "parsedBlobs": 601,
+          "recomputedCommits": 94,
+          "skippedBlobs": 1
+        },
+        "peakRssKiB": 24500,
+        "replaySeconds": 3.418223882003076,
+        "sha256": "b0e65428c2a5284f41b1d934781ded8ac3a6a390b6a72d7871dd803ac75ad489",
+        "totalSeconds": 3.949030658000993,
+        "validationSeconds": 0.5308067759979167
+      }
+    ]
+  },
+  "scenario": "raw-present-stats-empty"
+}

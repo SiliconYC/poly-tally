@@ -1,0 +1,179 @@
+{
+  "caveats": [
+    "No network transport measured. True network-cold cost is unknown.",
+    "local-cold-stage copies local raw JSON into an empty directory; OS page cache is not flushed.",
+    "incremental retains prefix statistics, but reopens and revalidates raw inputs in a fresh process; prefix setup is unmeasured.",
+    "Inputs are synthetic high-reuse history, not a claim about all repositories."
+  ],
+  "codeRoot": "/tmp/poly-rebuild-baseline",
+  "codeSha256": "79ddae87804e455f47817acb56becc012695615777584dc07fa90fddcd1dfbf7",
+  "equivalentAcrossScenarios": true,
+  "fixture": {
+    "commits": 500,
+    "filesAtHead": 2001,
+    "groupSize": 20,
+    "identity": "SHA-1-valid Git tree/blob bytes and deterministic synthetic API commit metadata; not user repository data",
+    "kind": "synthetic-high-reuse-history",
+    "rawJsonBytes": 5309012,
+    "rulesSha256": "4342e930bdbe205a22726904e3f89b11b1e6b0337f5ce89d1baa33eb1ed14f8e",
+    "stableBlobPool": 100,
+    "stableFiles": 2000,
+    "uniqueObjects": {
+      "blobs": 600,
+      "commits": 500,
+      "trees": 1005
+    },
+    "uniqueSourceBytes": 21260
+  },
+  "label": "baseline-3b8151f",
+  "measurementNotes": [
+    "Exploratory baseline: overlapped briefly with another agent's real-repository profiling/timing; do not interpret ratios as precision-grade or universally representative.",
+    "The three baseline scenarios took 120.798\u2013128.055 seconds; only raw-present-stats-empty is the direct zero-statistics rebuild comparison."
+  ],
+  "measurements": [
+    {
+      "auditCounts": {
+        "apiCommits": 500,
+        "verifiedBlobs": 600,
+        "verifiedTrees": 1005
+      },
+      "databaseRows": {
+        "blobs": 600,
+        "repositories": 1
+      },
+      "engineCounters": {
+        "cacheHits": 1900,
+        "objectReads": 600,
+        "parsedBlobs": 600,
+        "recomputedCommits": 500,
+        "skippedBlobs": 0
+      },
+      "outputSha256": "5955aaa99029b30ba846203af4b9c363b58af33351d2ff654720804cd12acfd5",
+      "peakRssKiB": 46996,
+      "repeat": 0,
+      "scenario": "local-cold-stage",
+      "snapshotCount": 500,
+      "timingsSeconds": {
+        "rawStage": 0.06383892799931346,
+        "replay": 1.1083904529987194,
+        "total": 124.7017445499987,
+        "validation": 123.52933628199753
+      },
+      "totalCounts": {
+        "pathChecks": 1003000,
+        "rawReads": {
+          "blobs": 1200,
+          "commits": 500,
+          "manifest": 1,
+          "trees": 1005
+        }
+      },
+      "validationCounts": {
+        "pathChecks": 1000500,
+        "rawReads": {
+          "blobs": 600,
+          "commits": 500,
+          "manifest": 1,
+          "trees": 1005
+        }
+      }
+    },
+    {
+      "auditCounts": {
+        "apiCommits": 500,
+        "verifiedBlobs": 600,
+        "verifiedTrees": 1005
+      },
+      "databaseRows": {
+        "blobs": 600,
+        "repositories": 1
+      },
+      "engineCounters": {
+        "cacheHits": 1900,
+        "objectReads": 600,
+        "parsedBlobs": 600,
+        "recomputedCommits": 500,
+        "skippedBlobs": 0
+      },
+      "outputSha256": "5955aaa99029b30ba846203af4b9c363b58af33351d2ff654720804cd12acfd5",
+      "peakRssKiB": 46364,
+      "repeat": 0,
+      "scenario": "raw-present-stats-empty",
+      "snapshotCount": 500,
+      "timingsSeconds": {
+        "rawStage": 0.0,
+        "replay": 1.2398495950001234,
+        "total": 120.79810284099949,
+        "validation": 119.55815347600219
+      },
+      "totalCounts": {
+        "pathChecks": 1003000,
+        "rawReads": {
+          "blobs": 1200,
+          "commits": 500,
+          "manifest": 1,
+          "trees": 1005
+        }
+      },
+      "validationCounts": {
+        "pathChecks": 1000500,
+        "rawReads": {
+          "blobs": 600,
+          "commits": 500,
+          "manifest": 1,
+          "trees": 1005
+        }
+      }
+    },
+    {
+      "auditCounts": {
+        "apiCommits": 500,
+        "verifiedBlobs": 600,
+        "verifiedTrees": 1005
+      },
+      "codeSha256": "79ddae87804e455f47817acb56becc012695615777584dc07fa90fddcd1dfbf7",
+      "databaseRows": {
+        "blobs": 600,
+        "repositories": 1
+      },
+      "engineCounters": {
+        "cacheHits": 0,
+        "objectReads": 1,
+        "parsedBlobs": 1,
+        "recomputedCommits": 1,
+        "skippedBlobs": 0
+      },
+      "outputSha256": "5955aaa99029b30ba846203af4b9c363b58af33351d2ff654720804cd12acfd5",
+      "peakRssKiB": 46184,
+      "repeat": 0,
+      "scenario": "incremental",
+      "snapshotCount": 500,
+      "timingsSeconds": {
+        "rawStage": 0.0,
+        "replay": 0.03270534100010991,
+        "total": 128.05506182200043,
+        "validation": 128.02227249600037
+      },
+      "totalCounts": {
+        "pathChecks": 1000501,
+        "rawReads": {
+          "blobs": 601,
+          "commits": 500,
+          "manifest": 1,
+          "trees": 1005
+        }
+      },
+      "validationCounts": {
+        "pathChecks": 1000500,
+        "rawReads": {
+          "blobs": 600,
+          "commits": 500,
+          "manifest": 1,
+          "trees": 1005
+        }
+      }
+    }
+  ],
+  "operation": "connector validation + engine sync; excludes fixture creation, export/publication, and interpreter startup",
+  "python": "3.12.14"
+}
