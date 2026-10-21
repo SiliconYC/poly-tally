@@ -132,3 +132,24 @@ test('language overview supports ascending scale and reversible name ordering', 
   assert.deepEqual(languageTotals(repositories, 'code', { key: 'value', direction: 'asc' }).map(row => row.name), ['Python', 'Rust']);
   assert.deepEqual(languageTotals(repositories, 'code', { key: 'name', direction: 'desc' }).map(row => row.name), ['Rust', 'Python']);
 });
+
+test('total lines include each physical line category once and exclude file counts', () => {
+  const snapshot = { timestamp: day(1), metrics: { code: 12, comment: 3, blank: 4, documentation: 6, files: 2 }, languages: { Python: { code: 12, comment: 3, blank: 4, documentation: 0, files: 1 }, Markdown: { code: 0, comment: 0, blank: 0, documentation: 6, files: 1 } } };
+  const repositories = [repo('a', [snapshot])];
+  assert.equal(latestTotals(repositories).total, 25);
+  assert.equal(latestTotals(repositories, 'Python').total, 19);
+  assert.equal(latestTotals([]).total, 0);
+  assert.deepEqual(languageTotals(repositories, 'total'), [{ name: 'Python', value: 19 }, { name: 'Markdown', value: 6 }]);
+  assert.equal(aggregateHistory(repositories, {metric: 'total'})[0].value, 25);
+});
+
+test('repository columns sort independently by physical totals, comments and documentation', () => {
+  const a = repo('a', [snapshot(day(1), 10, 'Python', 3)]);
+  const b = repo('b', [snapshot(day(1), 5, 'Python', 20)]);
+  a.history[0].metrics.comment = 4;
+  assert.deepEqual(model.sortRepositories([a, b], {key: 'total', direction: 'desc'}).map(r => r.id), ['b', 'a']);
+  assert.deepEqual(model.sortRepositories([b, a], {key: 'comment', direction: 'desc'}).map(r => r.id), ['a', 'b']);
+  assert.deepEqual(model.sortRepositories([a, b], {key: 'documentation', direction: 'desc'}).map(r => r.id), ['b', 'a']);
+  assert.equal(model.repositoryDisplayName?.(a), 'a');
+  assert.equal(model.repositoryDisplayName?.(privateRepo()), '私有仓库 · 012345');
+});

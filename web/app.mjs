@@ -1,4 +1,4 @@
-import { METRIC_LABELS, STATUS_LABELS, aggregateHistory, selectRepositories, latestTotals, languageTotals, loadStats, publicationSummary, repositoryVisibility, sortRepositories, repositoryOptions, stockChange } from './model.mjs';
+import { METRIC_LABELS, STATUS_LABELS, aggregateHistory, selectRepositories, latestTotals, languageTotals, loadStats, publicationSummary, repositoryVisibility, repositoryDisplayName, sortRepositories, repositoryOptions, stockChange } from './model.mjs';
 
 const $ = id => document.getElementById(id);
 const format = number => new Intl.NumberFormat('zh-CN').format(number);
@@ -25,12 +25,12 @@ function svgElement(tag, attributes = {}, text) {
 }
 function badge(text, style = '') { return element('span', `status-badge ${style}`, text); }
 function repositoryLink(repository) {
-  const name = element('span', 'repo-name', repository.name);
+  const name = element('span', 'repo-name', repositoryDisplayName(repository));
   if (repositoryVisibility(repository) === 'private') return name;
   try {
     const url = new URL(repository.url);
     if (url.protocol === 'https:' && url.hostname === 'github.com') {
-      const link = element('a', 'repo-name', repository.name);
+      const link = element('a', 'repo-name', repositoryDisplayName(repository));
       link.href = url.href;
       link.target = '_blank';
       link.rel = 'noopener noreferrer';
@@ -87,7 +87,7 @@ function renderRepositoryOptions() {
       state.ids = input.checked ? [...new Set([...state.ids, repository.id])] : state.ids.filter(id => id !== repository.id);
       render();
     });
-    label.append(input, element('span', '', repository.name), element('small', '', key === 'metric' ? format(latestTotals([repository], state.language)[state.metric]) : repositoryVisibility(repository) === 'private' ? '私有' : '公开'));
+    label.append(input, element('span', '', repositoryDisplayName(repository)), element('small', '', key === 'metric' ? format(latestTotals([repository], state.language)[state.metric]) : repositoryVisibility(repository) === 'private' ? '私有' : '公开'));
     options.append(label);
   }
   if (!repositories.length) options.append(element('p', 'inline-empty', data.repositories.length ? '没有匹配的仓库' : '暂无已发布仓库'));
@@ -171,38 +171,28 @@ function renderLanguages(repositories) {
   }
 }
 function renderTable() {
-  const repositories = sortRepositories(data.repositories.filter(repository => state.ids.includes(repository.id) && (state.scope === 'all' || repositoryVisibility(repository) === state.scope)), { key: state.tableSort, direction: state.tableDirection, metric: state.metric, language: state.language });
+  const repositories = sortRepositories(selectRepositories(data, state), { key: state.tableSort, direction: state.tableDirection, metric: state.metric, language: state.language });
   for (const button of document.querySelectorAll('[data-sort]')) {
     const active = button.dataset.sort === state.tableSort;
     button.closest('th').setAttribute('aria-sort', active ? state.tableDirection === 'asc' ? 'ascending' : 'descending' : 'none');
     button.lastElementChild.textContent = active ? state.tableDirection === 'asc' ? '↑' : '↓' : '↕';
   }
-  const eligible = new Set(selectRepositories(data, state).map(repository => repository.id));
   $('repository-count').textContent = format(repositories.length);
-  $('table-metric').textContent = METRIC_LABELS[state.metric];
   const tbody = $('repository-table'); tbody.replaceChildren();
   if (!repositories.length) {
     const row = element('tr'), cell = element('td', 'empty-table', data.repositories.length ? '没有选中的仓库，请调整筛选范围。' : '暂无仓库；等待首次成功采集。');
-    cell.colSpan = 5; row.append(cell); tbody.append(row);
+    cell.colSpan = 7; row.append(cell); tbody.append(row);
   }
   for (const repository of repositories) {
     const isPrivate = repositoryVisibility(repository) === 'private';
     const row = element('tr');
     const name = element('td'); name.append(repositoryLink(repository), element('span', 'repo-secondary', isPrivate ? '私有 · 按日规模' : `公开 · ⑂ ${repository.branch || '尚无默认分支'}`));
-    const value = latestTotals([repository], state.language)[state.metric];
-    const metric = element('td', 'repo-number', repository.history.length ? format(value) : '—');
-    if (!eligible.has(repository.id)) metric.append(element('small', '', '未汇总'));
-    const head = element('td');
-    head.append(element('span', '', formatDate(repository.lastSuccessAt)), element('span', 'repo-secondary', isPrivate ? 'UTC · 日级规模' : 'UTC · ' + (repository.head ? repository.head.slice(0, 8) : '尚无提交')));
-    const status = element('td');
-    const style = ['inaccessible', 'stale'].includes(repository.status) ? 'error-status' : ['active', 'archived'].includes(repository.status) ? '' : 'muted-status';
-    status.append(badge(STATUS_LABELS[repository.status] ?? repository.status, style));
-    if (repository.notice) { const notice = element('span', 'repo-secondary', repository.notice); notice.title = repository.notice; status.append(notice); }
-    const rule = element('td');
-    rule.append(element('span', repository.historyComplete ? 'rule-ok' : 'rule-bad', isPrivate ? '按日规模快照' : repository.historyComplete ? '提交历史完整' : '提交历史不完整'));
-    const matching = repository.rulesVersion === data.rules.version;
-    rule.append(element('span', `repo-secondary ${matching ? '' : 'rule-bad'}`, `${repository.rulesVersion || '未知规则'}${matching ? ' · 统一口径' : ' · 旧口径，已隔离'}`));
-    row.append(name, metric, head, status, rule); tbody.append(row);
+    const totals = latestTotals([repository], state.language);
+    row.append(name);
+    for (const metric of ['total', 'code', 'comment', 'documentation', 'blank', 'files']) {
+      row.append(element('td', 'repo-number', format(totals[metric])));
+    }
+    tbody.append(row);
   }
 }
 function renderRun() {
@@ -307,7 +297,7 @@ $('repository-search').addEventListener('input', event => { state.query = event.
 $('repository-sort').addEventListener('change', event => { state.pickerSort = event.target.value; renderRepositoryOptions(); });
 $('language-sort').addEventListener('change', event => { state.languageSort = event.target.value; renderLanguages(selectRepositories(data, state)); });
 for (const button of document.querySelectorAll('[data-sort]')) button.addEventListener('click', () => {
-  state.tableDirection = state.tableSort === button.dataset.sort ? state.tableDirection === 'asc' ? 'desc' : 'asc' : ['metric', 'updated'].includes(button.dataset.sort) ? 'desc' : 'asc';
+  state.tableDirection = state.tableSort === button.dataset.sort ? state.tableDirection === 'asc' ? 'desc' : 'asc' : button.dataset.sort !== 'name' ? 'desc' : 'asc';
   state.tableSort = button.dataset.sort;
   renderTable();
 });
