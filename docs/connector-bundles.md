@@ -47,6 +47,8 @@ objects/blobs/<sha>.json               # 下述无损 base64 响应
 省略时为 `all`。示例 SHA 仅说明格式，并非真实对象。`head` 在抓取前固定；
 抓取后重新读取默认分支名和 HEAD，分别写入 `verifiedDefaultBranch`、`verifiedHead`。
 前后不一致必须拒绝，不能混合快照。私有范围的完整证明不代表公开或全部仓库已完成。
+可选 `captureStatus` 若存在，完整导入只接受 `complete`；仅单仓校验可忽略其他
+尚未完成的条目，完整导入仍检查全部纳入仓库的最终引用证明。
 
 可选 `verifiedAt` 记录该仓库最终引用核对的时间；省略时采用 `capturedAt`。
 导入后的 `lastSuccessAt` 保留这个源观察时间，不能因隔日重算而伪装成当天读源。

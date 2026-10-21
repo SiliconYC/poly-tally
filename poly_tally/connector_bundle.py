@@ -99,8 +99,8 @@ class ConnectorBundle:
                 raise ValueError('invalid or duplicate bundle repository identity')
             if any(type(meta.get(field)) is not bool for field in ('private', 'archived', 'fork')):
                 raise ValueError('bundle requires explicit repository visibility/archive/fork metadata')
-            if 'head' not in item or 'verifiedHead' not in item or item['head'] != item['verifiedHead'] or branch != item.get('verifiedDefaultBranch'):
-                raise ValueError('default branch/HEAD changed during capture or was not rechecked')
+            if 'head' not in item or 'verifiedHead' not in item:
+                raise ValueError('bundle requires pinned and verified HEAD fields')
             if item['head'] is not None:
                 _sha(item['head'])
             elif item.get('emptyRepository') is not True or any(
@@ -110,8 +110,6 @@ class ConnectorBundle:
                     or 'git repository is empty' not in item[field]['message'].casefold()
                     for field in ('emptyEvidence', 'verifiedEmptyEvidence')):
                 raise ValueError('null HEAD requires two explicit GitHub API empty-repository confirmations; 404/size=0 are not evidence')
-            if 'verifiedAt' in item:
-                _date(item['verifiedAt'])
             self.repositories[key] = item
             names.add(name.casefold())
         if any(item['metadata']['private'] for item in self.repositories.values()) and self.root.stat().st_mode & 0o077:
@@ -262,6 +260,12 @@ class ConnectorGitObjects:
         self.bundle = bundle
         self.metadata = item['metadata'].copy()
         self.head = item['head']
+        # Partial capture inspection may select one completed repository while
+        # other inventory entries still await their final reference recheck.
+        if self.head != item['verifiedHead'] or self.metadata['default_branch'] != item.get('verifiedDefaultBranch'):
+            raise ValueError('default branch/HEAD changed during capture or was not rechecked')
+        if 'verifiedAt' in item:
+            _date(item['verifiedAt'])
         self._history = None
         self._validated = False
 
@@ -385,6 +389,8 @@ def import_bundle(bundle_root, config, state, epoch, *, expected_inventory=None,
                     meta = bundle.repositories[key]['metadata']
                     if expected_meta['name'].casefold() != meta['full_name'].casefold() or (expected_meta['visibility'] == 'private') != meta['private'] or expected_meta['archived'] != meta['archived']:
                         raise ValueError('expected repository metadata changed during connector capture')
+            if any(bundle.repositories[key].get('captureStatus', 'complete') != 'complete' for key in selected):
+                raise ValueError('selected repository capture is not complete')
             started = time.monotonic()
             bundle.validate(selected)  # All required objects before ANY metric parsing.
             public_counts = {key: 0 for key in engine.计数}

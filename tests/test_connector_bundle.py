@@ -459,3 +459,40 @@ def test_repository_final_ref_observation_time_overrides_capture_start(fixture):
     mutate_json(root / 'manifest.json', lambda d: d['repositories'][0].update(verifiedAt=verified))
     result = adapter_module().import_bundle(root, fixture.config, fixture.root / 'state', 'fresh', include_private_metrics=True)
     assert result['private']['repositories'][0]['lastSuccessAt'] == verified
+
+
+def test_selected_validation_ignores_unfinished_other_repository_capture(fixture):
+    fixture.commit({'a.py': 'x=1\n'})
+    root = fixture.write_bundle()
+    manifest = json.loads((root / 'manifest.json').read_text())
+    unfinished = copy.deepcopy(manifest['repositories'][0])
+    unfinished['metadata'].update(id=2, full_name='fixture/unfinished')
+    unfinished.update(verifiedHead=None, verifiedDefaultBranch=None, verifiedAt=None, captureStatus='capturing')
+    manifest['repositories'].append(unfinished)
+    manifest['discoveryComplete'] = False
+    write_json(root / 'manifest.json', manifest)
+    captured = adapter_module().ConnectorBundle(root, fixture.rules)
+    assert captured.validate(['1'])['verifiedBlobs'] == 1
+    with pytest.raises(ValueError):
+        captured.validate()
+
+
+def test_complete_import_still_rejects_unverified_or_capturing_repository(fixture):
+    fixture.commit({'a.py': 'x=1\n'})
+    root = fixture.write_bundle()
+    manifest = json.loads((root / 'manifest.json').read_text())
+    unfinished = copy.deepcopy(manifest['repositories'][0])
+    unfinished['metadata'].update(id=2, full_name='fixture/unfinished')
+    unfinished.update(verifiedHead=None, verifiedDefaultBranch=None)
+    manifest['repositories'].append(unfinished)
+    manifest['discoveryComplete'] = True  # Must not override missing final proof.
+    write_json(root / 'manifest.json', manifest)
+    state = fixture.root / 'incomplete-state'
+    with pytest.raises(ValueError):
+        adapter_module().import_bundle(root, fixture.config, state, 'fresh')
+    assert not state.exists()
+    unfinished.update(verifiedHead=unfinished['head'], verifiedDefaultBranch='main', captureStatus='capturing')
+    write_json(root / 'manifest.json', manifest)
+    with pytest.raises(ValueError, match='capture'):
+        adapter_module().import_bundle(root, fixture.config, state, 'fresh')
+    assert not state.exists()
