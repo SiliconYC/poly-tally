@@ -153,3 +153,18 @@ test('repository columns sort independently by physical totals, comments and doc
   assert.equal(model.repositoryDisplayName?.(a), 'a');
   assert.equal(model.repositoryDisplayName?.(privateRepo()), '私有仓库 · 012345');
 });
+
+test('stacked history carries each repository forward, preserves unknowns, and resolves simultaneous snapshots', () => {
+  const repositories = [repo('a', [snapshot(day(1), 10), snapshot(day(3), 14), snapshot(day(3), 16)]), repo('b', [snapshot(day(2), 20)]), repo('c', [snapshot(day(3), 4), snapshot(day(4), 2)])];
+  const result = model.stackedHistory?.(repositories, {until: day(5)});
+  assert.deepEqual(result?.series.map(r => r.id), ['a', 'b', 'c']);
+  assert.deepEqual(result?.points.map(p => [p.timestamp, p.value, p.values]), [
+    [day(1), 10, [10, null, null]], [day(2), 30, [10, 20, null]],
+    [day(3), 40, [16, 20, 4]], [day(4), 38, [16, 20, 2]], [day(5), 38, [16, 20, 2]],
+  ]);
+  assert.deepEqual(model.stackedHistory?.(repositories, {since: day(2), until: day(3), language: 'Rust'}).points.map(p => p.values), [[0, 0, null], [0, 0, 0]]);
+  assert.deepEqual(model.stackedHistory?.(repositories, {since: '2026-10-02T12:00:00Z', until: day(3)}).points.map(p => p.values), [[10, 20, null], [16, 20, 4]]);
+  assert.deepEqual(model.stackedHistory?.([], {}).points, []);
+  assert.deepEqual(model.stackedHistory?.(repositories, {since: day(5), until: day(4)}).points, []);
+  assert.deepEqual(model.stackedHistory?.(repositories, {until: '2026-09-01T00:00:00Z'}).points, []);
+});

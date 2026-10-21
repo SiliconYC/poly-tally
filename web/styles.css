@@ -3,3 +3,48 @@
 @media(min-width:1400px){.site-header,main,footer{width:min(1180px,calc(100% - 100px))}.chart-container{height:355px}}
 @media(max-width:760px){.site-header,main,footer{width:calc(100% - 36px)}.site-header{height:68px}.brand{font-size:15px}.page-heading{padding:28px 0 23px;align-items:flex-start}.page-heading h1{font-size:26px}.page-heading p{font-size:11px}.update-box{gap:7px;font-size:9px;white-space:normal;text-align:right;max-width:150px;padding-top:5px}.update-box small{font-size:9px}.icon-button{width:27px;height:27px;flex-shrink:0}.filters{gap:8px;margin-bottom:20px}.filters select,.filters summary{font-size:11px;padding:7px 10px;min-height:36px}.repository-picker>summary{min-width:150px}.filters .text-button{margin-left:auto}.more-filters{position:static}.more-menu{left:auto;right:0;top:88px}.timeline-panel{padding:23px 18px 14px}.overview{gap:18px;padding-bottom:23px;align-items:flex-start}.headline-stat{min-width:0;flex:1}.headline-stat strong{font-size:clamp(26px,8vw,34px);letter-spacing:-1.5px}.headline-stat>span,.change-stat>span{font-size:11px}.headline-stat p,.change-stat p{font-size:10px}.change-stat{padding-left:18px;flex:0 0 40%;max-width:40%;margin-top:2px}.change-stat strong{font-size:20px;margin:5px 0}.change-stat strong.unavailable{font-size:16px}.chart-heading{padding-top:20px}.chart-heading h2{font-size:12px}.chart-container{height:270px}.chart-hint{font-size:9px;right:0}.chart-bottom{font-size:9px;flex-wrap:wrap;gap:2px}.languages-panel{padding:21px 20px}.section-heading h2{font-size:14px}.language-total{gap:5px;flex-wrap:wrap;justify-content:flex-end}.language-total strong{font-size:12px}.language-total span{font-size:9px}.language-list{grid-template-columns:repeat(2,minmax(0,1fr));gap:0 23px}.language-row{font-size:11px;gap:6px}.language-percent{font-size:9px;min-width:34px}.language-count{font-size:10px}.repositories-panel .section-heading{padding:21px 20px 16px}.table-scroll{max-width:100%}table{min-width:720px}.technical-content{grid-template-columns:1fr;gap:20px}.technical-details{margin-top:26px}.panel{margin-bottom:20px}footer{font-size:9px;padding-top:20px}footer>span:last-child{text-align:right}.repository-menu{max-width:calc(100vw - 36px);width:354px}.chart-tooltip{padding:10px 12px;min-width:155px}}
 @media(prefers-reduced-motion:reduce){*{animation:none!important;scroll-behavior:auto!important}}
+
+/* 堆叠图保持快照边界，避免平滑曲线暗示不存在的中间存量。 */
+.chart-container{height:410px;margin-top:8px}
+.chart-mode{display:flex;border:1px solid var(--line);border-radius:7px;padding:3px;gap:3px}
+.chart-mode button{padding:5px 13px;font-size:11px;color:var(--muted);border-radius:4px}
+.chart-mode button[aria-pressed=true]{background:#edf3ff;color:var(--blue);font-weight:600}
+.chart-instructions{color:var(--muted);font-size:11px;margin-top:14px;line-height:1.8}
+.color-dot{display:inline-block;flex:0 0 8px;width:8px;height:8px;border-radius:3px}
+.series-legend{display:flex;flex-wrap:wrap;gap:7px 10px;padding:18px 0}
+.series-toggle{display:flex;gap:7px;align-items:center;padding:5px 8px;border:1px solid transparent;border-radius:5px;font-size:11px;color:#52627a;max-width:100%;overflow-wrap:anywhere;text-align:left}
+.series-toggle:hover{background:#f6f8fc;border-color:#dce4f1}
+.series-toggle[aria-pressed=false]{opacity:.5;text-decoration:line-through;background:#f1f3f7}
+.stack-layer{transition:opacity .12s;cursor:crosshair;vector-effect:non-scaling-stroke}
+.chart-cursor{stroke:#435570;stroke-dasharray:3 3}
+.stack-tooltip{min-width:225px;max-width:min(320px,100%);font-size:11px;padding:14px}
+.stack-tooltip strong{color:var(--ink);font-size:19px;margin-bottom:8px}
+.stack-tooltip small{display:block;margin-top:8px;color:var(--muted)}
+.tooltip-row{display:flex;align-items:center;gap:7px;padding:4px 0;color:#516078}
+.tooltip-row>span{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:180px}
+.tooltip-row b{color:var(--ink);font-variant-numeric:tabular-nums;font-weight:500}
+.chart-navigator{margin:10px 16px 15px 58px}
+.navigator-plot{position:relative;height:52px;border-radius:5px;background:#f2f5fa;touch-action:none;cursor:pointer}
+.navigator-plot svg{width:100%;height:100%;display:block;border-radius:5px;overflow:hidden}
+.navigator-window{position:absolute;top:0;height:100%;border:1px solid #7297d5;background:#a4bee82b;cursor:grab;min-width:3px}
+.navigator-handle{position:absolute;top:10px;width:12px;height:30px;background:#fff;border:1px solid #7297d5;border-radius:4px;cursor:ew-resize;box-shadow:0 1px 4px #294d7b18;touch-action:none}
+.navigator-handle:after{content:'Ⅱ';font-size:9px;color:#6d8fbe}
+.navigator-handle.start{left:-6px}.navigator-handle.end{right:-6px}
+.navigator-controls{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-top:10px;font-size:10px;color:var(--muted)}
+.navigator-controls label{display:flex;align-items:center;gap:5px}
+.navigator-controls input{padding:3px 5px;border:1px solid var(--line);border-radius:4px;font-family:inherit;color:#516078;font-size:11px;background:white}
+.navigator-controls .text-button{margin-left:auto;font-size:10px}.navigator-hint{font-size:10px}
+.snapshot-details{border-top:1px solid var(--line);padding:13px 0 0}
+.snapshot-details summary{font-size:11px;color:#52627a;cursor:pointer}
+.snapshot-details summary>span{color:var(--muted);font-size:10px;float:right}
+.snapshot-heading{display:flex;flex-wrap:wrap;gap:8px;justify-content:space-between;font-size:11px;color:var(--muted);padding:16px 0 8px}
+.snapshot-heading strong{color:var(--ink);font-weight:500}
+.snapshot-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 28px;max-height:220px;overflow:auto}
+.snapshot-row{display:flex;gap:8px;align-items:center;font-size:11px;border-bottom:1px solid #f1f4f8;padding:8px 0;min-width:0}
+.snapshot-name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.snapshot-row strong{font-variant-numeric:tabular-nums;font-weight:500}.snapshot-percent{min-width:40px;color:var(--muted);text-align:right;font-size:10px}
+.repositories-panel td:first-child{width:27%}.repositories-panel td:not(:first-child){text-align:right}
+.repositories-panel th:not(:first-child) button{justify-content:flex-end}
+.repositories-panel .table-note{max-width:65%;text-align:right;line-height:1.7}
+@media(min-width:1400px){.chart-container{height:440px}}
+@media(max-width:760px){.chart-container{height:310px}.chart-instructions{font-size:10px}.chart-navigator{margin-left:42px;margin-right:16px}.navigator-hint{display:none}.snapshot-list{grid-template-columns:1fr}.snapshot-details summary>span{float:none;display:block;margin:6px 0 0 14px}.chart-mode button{padding:4px 10px}.series-legend{gap:4px}.series-toggle{font-size:10px;padding:5px}.repositories-panel .table-note{font-size:9px}.navigator-controls{gap:8px}.navigator-controls input{max-width:118px}table{min-width:840px}}

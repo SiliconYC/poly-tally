@@ -55,38 +55,39 @@ export function languageTotals(repositories, metric = 'code', { key = 'value', d
   return [...totals].map(([name, value]) => ({ name, value })).filter(language => language.value > 0).sort((a, b) => (key === 'name' ? a.name.localeCompare(b.name) : a.value - b.value) * (direction === 'desc' ? -1 : 1) || a.name.localeCompare(b.name));
 }
 
-export function aggregateHistory(repositories, { language = 'all', metric = 'code', since, until } = {}) {
+export function stackedHistory(repositories, { language = 'all', metric = 'code', since, until } = {}) {
+  const series = repositories.map(repository => ({ id: repository.id, name: repositoryDisplayName(repository) }));
   const events = repositories.flatMap((repository, repoIndex) => sortedHistory(repository).map(snapshot => ({ ...snapshot, repoIndex })));
   events.sort((a, b) => a.time - b.time || a.index - b.index);
-  if (!events.length) return [];
+  const points = [];
+  if (!events.length) return { series, points };
   const start = since ? instant(since) : events[0].time;
   const end = until ? instant(until) : events.at(-1).time;
-  if (!Number.isFinite(start) || !Number.isFinite(end) || start > end || events[0].time > end) return [];
-  const stocks = new Map();
-  let total = 0;
-  const points = [];
-  let beforeWindow = false;
-  for (let index = 0; index < events.length;) {
+  if (!Number.isFinite(start) || !Number.isFinite(end) || start > end || events[0].time > end) return { series, points };
+  const stocks = Array(repositories.length).fill(null);
+  const emit = time => points.push({ timestamp: iso(time), value: stocks.reduce((sum, value) => sum + (value ?? 0), 0), values: [...stocks] });
+  let index = 0;
+  // 首次观测前保留 null；窗口起点只延续已经存在的存量，不假造新增。
+  while (index < events.length && events[index].time < start) {
+    const event = events[index++];
+    stocks[event.repoIndex] = metricValue(snapshotMetrics(event, language), metric);
+  }
+  if (index > 0 && (index === events.length || events[index].time > start)) emit(start);
+  while (index < events.length && events[index].time <= end) {
     const time = events[index].time;
-    if (time > end) break;
-    // 同刻快照先更新所有仓库，再发出一个观察点，避免显示并不存在的中间总量。
+    // 同刻快照全部更新后再发出观察点，避免并不存在的中间总量。
     while (index < events.length && events[index].time === time) {
       const event = events[index++];
-      const value = metricValue(snapshotMetrics(event, language), metric);
-      total += value - (stocks.get(event.repoIndex) ?? 0);
-      stocks.set(event.repoIndex, value);
+      stocks[event.repoIndex] = metricValue(snapshotMetrics(event, language), metric);
     }
-    if (time < start) beforeWindow = true;
-    else {
-      points.push({ timestamp: iso(time), value: total });
-    }
+    emit(time);
   }
-  if (beforeWindow && !points.some(point => instant(point.timestamp) === start)) {
-    const baseline = latestTotals(repositories.map(repository => ({ ...repository, history: repository.history.filter(snapshot => instant(snapshot.timestamp) < start) })), language)[metric];
-    points.unshift({ timestamp: iso(start), value: baseline });
-  }
-  if (points.length && instant(points.at(-1).timestamp) < end) points.push({ timestamp: iso(end), value: points.at(-1).value });
-  return points;
+  if (points.length && instant(points.at(-1).timestamp) < end) emit(end);
+  return { series, points };
+}
+
+export function aggregateHistory(repositories, options = {}) {
+  return stackedHistory(repositories, options).points.map(({timestamp, value}) => ({timestamp, value}));
 }
 
 export async function loadStats(fetcher = fetch) {

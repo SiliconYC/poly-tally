@@ -1,3 +1,5 @@
+import {renderStackedChart} from './stacked-chart.mjs';
+import {repositoryColors} from './chart-utils.mjs';
 import { METRIC_LABELS, STATUS_LABELS, aggregateHistory, selectRepositories, latestTotals, languageTotals, loadStats, publicationSummary, repositoryVisibility, repositoryDisplayName, sortRepositories, repositoryOptions, stockChange } from './model.mjs';
 
 const $ = id => document.getElementById(id);
@@ -9,6 +11,8 @@ const formatDate = value => Number.isFinite(Date.parse(value)) ? dateFormat.form
 const palette = ['#2563eb', '#7c6ad8', '#0d9488', '#d89a40', '#df7280', '#5c9eca', '#7cab68', '#94a3b8'];
 const languageColors = { Python: '#4485d8', JavaScript: '#e0b34b', TypeScript: '#7e72d4', Rust: '#d58d69', Go: '#59aebc', Markdown: '#8da2ba', HTML: '#df8591', CSS: '#9a85cd', Shell: '#6aaf96' };
 let data;
+let colors;
+const chartView = {hidden: new Set(), range: null, percent: false};
 const state = { mode: 'current', ids: [], scope: 'all', language: 'all', metric: 'code', period: 'all', includeStale: false, tableSort: 'name', tableDirection: 'asc', pickerSort: 'name-asc', query: '', languageSort: 'value-desc' };
 
 function element(tag, className, text) {
@@ -49,6 +53,7 @@ async function initialize() {
   setLoading();
   try {
     data = await loadStats();
+    colors = repositoryColors(data.repositories);
     state.ids = data.repositories.map(repository => repository.id);
     populateFilters();
     $('load-state').hidden = true;
@@ -136,12 +141,10 @@ function render() {
   if (cold.length) messages.push(`历史档案纳入 ${cold.length} 个冷数据仓库，保留最后成功快照并向后延续。`);
   $('warnings').hidden = !messages.length;
   $('warnings').textContent = messages.join(' ');
-  $('chart-legend').textContent = METRIC_LABELS[state.metric];
   $('timeline-title').textContent = `${METRIC_LABELS[state.metric]}存量趋势`;
   const until = data.generatedAt;
   const since = state.period === 'all' ? undefined : new Date(Date.parse(until) - Number(state.period) * 86400000).toISOString();
-  const points = aggregateHistory(selected, { language: state.language, metric: state.metric, since, until });
-  renderChart(points);
+  renderStackedChart({container: $('chart'), navigator: $('chart-navigator'), legend: $('chart-legend'), details: $('chart-details'), rangeLabel: $('chart-range'), repositories: selected, colors, metric: state.metric, label: METRIC_LABELS[state.metric], language: state.language, since, until, view: chartView});
   renderLanguages(selected);
   renderTable();
   const changeDays = state.period === 'all' ? 30 : Number(state.period);
@@ -206,86 +209,17 @@ function renderRun() {
   for (const [value, name] of fields) { const item = element('div'); item.append(element('strong', '', value), element('span', '', name)); $('run-summary').append(item); }
   $('run-summary').append(element('p', 'run-time', `${formatDate(run.finishedAt)} UTC · 只读采集`));
 }
-function renderChart(points) {
-  const container = $('chart'); container.replaceChildren();
-  if (!points.length) {
-    const message = element('div', 'chart-empty');
-    message.append(element('strong', '', state.ids.length ? '这个范围还没有可用快照' : '选择仓库，展开时间线'), element('span', '', '可调整时间、语言或仓库范围；旧口径数据不会混入曲线。'));
-    container.append(message); $('chart-range').textContent = 'UTC'; return;
-  }
-  const width = Math.max(280, container.clientWidth), height = container.clientHeight, left = 49, right = 16, top = 20, bottom = 34;
-  const minTime = Date.parse(points[0].timestamp), maxTime = Date.parse(points.at(-1).timestamp);
-  const timeSpan = maxTime - minTime || 86400000;
-  const maximum = points.reduce((maximum, point) => Math.max(maximum, point.value), 1) * 1.15;
-  const plotWidth = width - left - right, plotHeight = height - top - bottom;
-  const x = time => left + (time - minTime) / timeSpan * plotWidth;
-  const y = value => top + plotHeight - value / maximum * plotHeight;
-  const svg = svgElement('svg', { viewBox: `0 0 ${width} ${height}`, role: 'img', tabindex: '0', 'aria-label': `${METRIC_LABELS[state.metric]}阶梯历史曲线。共 ${points.length} 个观察点，最新 ${format(points.at(-1).value)}。使用左右方向键查看详情，Home 和 End 跳到首尾。`, 'aria-describedby': 'chart-details' });
-  const defs = svgElement('defs'), gradient = svgElement('linearGradient', { id: 'chart-fill', x1: '0', y1: '0', x2: '0', y2: '1' });
-  gradient.append(svgElement('stop', { offset: '0%', 'stop-color': '#2563eb', 'stop-opacity': '.10' }), svgElement('stop', { offset: '100%', 'stop-color': '#2563eb', 'stop-opacity': '0' })); defs.append(gradient); svg.append(defs);
-  for (let i = 0; i <= 4; i++) {
-    const value = maximum * i / 4, cy = y(value);
-    svg.append(svgElement('line', { x1: left, x2: width - right, y1: cy, y2: cy, class: 'chart-grid' }), svgElement('text', { x: left - 12, y: cy + 3, 'text-anchor': 'end', class: 'chart-tick' }, compact(Math.round(value))));
-  }
-  const ticks = maxTime === minTime ? 1 : width < 450 ? 3 : 5;
-  for (let i = 0; i < ticks; i++) {
-    const time = minTime + (ticks === 1 ? 0 : timeSpan * i / (ticks - 1));
-    svg.append(svgElement('text', { x: x(time), y: height - 10, 'text-anchor': i === 0 ? 'start' : i === ticks - 1 ? 'end' : 'middle', class: 'chart-tick' }, timeSpan > 370 * 86400000 ? new Date(time).toISOString().slice(0, 7) : shortDate.format(time)));
-  }
-  let d = `M${left},${y(points[0].value).toFixed(2)}`;
-  for (const point of points.slice(1)) d += `H${x(Date.parse(point.timestamp)).toFixed(2)}V${y(point.value).toFixed(2)}`;
-  const lastX = x(maxTime);
-  if (points.length === 1) d += `H${width - right}`;
-  svg.append(svgElement('path', { d: `${d}V${height - bottom}H${left}Z`, class: 'chart-area' }), svgElement('path', { d, class: 'chart-line' }));
-  const cursor = svgElement('line', { x1: lastX, x2: lastX, y1: top, y2: height - bottom, class: 'chart-cursor', visibility: 'hidden' });
-  const dot = svgElement('circle', { cx: lastX, cy: y(points.at(-1).value), r: 4, class: 'chart-dot', visibility: 'hidden' });
-  svg.append(cursor, dot);
-  const tooltip = element('div', 'chart-tooltip'); tooltip.hidden = true;
-  const accessible = element('div', 'sr-only'); accessible.id = 'chart-details'; accessible.setAttribute('aria-live', 'polite');
-  accessible.textContent = '聚焦曲线后，使用左右方向键逐个查看观察点。';
-  const hint = element('span', 'chart-hint', '悬停查看 · 方向键浏览');
-  container.append(svg, tooltip, accessible, hint);
-  let activeIndex = points.length - 1;
-  function showPoint(index) {
-    activeIndex = Math.max(0, Math.min(points.length - 1, index));
-    const point = points[activeIndex], cx = x(Date.parse(point.timestamp)), cy = y(point.value);
-    cursor.setAttribute('x1', cx); cursor.setAttribute('x2', cx); cursor.setAttribute('visibility', 'visible');
-    dot.setAttribute('cx', cx); dot.setAttribute('cy', cy); dot.setAttribute('visibility', 'visible');
-    tooltip.hidden = false;
-    tooltip.replaceChildren(document.createTextNode(`${formatDate(point.timestamp)} UTC`), element('strong', '', `${format(point.value)} ${METRIC_LABELS[state.metric]}`));
-    const tooltipWidth = tooltip.offsetWidth, tooltipHeight = tooltip.offsetHeight;
-    const anchorX = cx / width * container.clientWidth;
-    const preferredX = anchorX + tooltipWidth + 16 > container.clientWidth ? anchorX - tooltipWidth - 12 : anchorX + 12;
-    tooltip.style.left = `${Math.max(5, Math.min(container.clientWidth - tooltipWidth - 5, preferredX))}px`;
-    tooltip.style.top = `${Math.max(8, Math.min(container.clientHeight - tooltipHeight - 5, cy / height * container.clientHeight - tooltipHeight - 12))}px`;
-    accessible.textContent = `${formatDate(point.timestamp)} UTC，${METRIC_LABELS[state.metric]} ${format(point.value)}。`;
-  }
-  svg.addEventListener('pointermove', event => {
-    const bounds = svg.getBoundingClientRect();
-    const time = minTime + Math.max(0, Math.min(1, ((event.clientX - bounds.left) / bounds.width * width - left) / plotWidth)) * timeSpan;
-    let low = 0, high = points.length - 1;
-    while (low < high) { const middle = Math.ceil((low + high) / 2); if (Date.parse(points[middle].timestamp) <= time) low = middle; else high = middle - 1; }
-    showPoint(low);
-  });
-  const hide = () => { tooltip.hidden = true; cursor.setAttribute('visibility', 'hidden'); dot.setAttribute('visibility', 'hidden'); };
-  svg.addEventListener('pointerleave', () => { if (document.activeElement !== svg) hide(); });
-  svg.addEventListener('focus', () => showPoint(activeIndex)); svg.addEventListener('blur', hide);
-  svg.addEventListener('keydown', event => {
-    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
-    event.preventDefault();
-    showPoint(event.key === 'Home' ? 0 : event.key === 'End' ? points.length - 1 : activeIndex + (event.key === 'ArrowRight' ? 1 : -1));
-  });
-  $('chart-range').textContent = `${new Date(minTime).toISOString().slice(0, 10)} — ${new Date(maxTime).toISOString().slice(0, 10)} · UTC`;
-}
 $('current-view').addEventListener('click', () => { state.mode = 'current'; render(); });
 $('archive-view').addEventListener('click', () => { state.mode = 'archive'; render(); });
 $('include-stale').addEventListener('change', event => { state.includeStale = event.target.checked; render(); });
-for (const id of ['scope', 'language', 'metric', 'period']) $(id).addEventListener('change', event => { state[id] = event.target.value; render(); });
+for (const id of ['scope', 'language', 'metric', 'period']) $(id).addEventListener('change', event => { state[id] = event.target.value; if (id === 'period') chartView.range = null; render(); });
 for (const [id, checked] of [['select-all', true], ['select-none', false]]) $(id).addEventListener('click', () => {
   for (const checkbox of $('repository-options').querySelectorAll('input')) checkbox.checked = checked;
   state.ids = checked ? data.repositories.map(repository => repository.id) : []; render();
 });
 $('reset-filters').addEventListener('click', () => {
+  chartView.hidden.clear(); chartView.range = null; chartView.percent = false;
+  $('chart-absolute').setAttribute('aria-pressed', 'true'); $('chart-percent').setAttribute('aria-pressed', 'false');
   state.ids = data.repositories.map(repository => repository.id); state.scope = 'all'; state.language = 'all'; state.metric = 'code'; state.period = 'all'; state.includeStale = false; state.mode = 'current'; state.query = ''; state.pickerSort = 'name-asc'; state.tableSort = 'name'; state.tableDirection = 'asc'; state.languageSort = 'value-desc';
   $('repository-search').value = ''; $('repository-sort').value = 'name-asc'; $('language-sort').value = 'value-desc';
   for (const id of ['scope', 'language', 'metric', 'period']) $(id).value = state[id];
@@ -300,6 +234,11 @@ for (const button of document.querySelectorAll('[data-sort]')) button.addEventLi
   state.tableDirection = state.tableSort === button.dataset.sort ? state.tableDirection === 'asc' ? 'desc' : 'asc' : button.dataset.sort !== 'name' ? 'desc' : 'asc';
   state.tableSort = button.dataset.sort;
   renderTable();
+});
+for (const [id, percent] of [['chart-absolute', false], ['chart-percent', true]]) $(id).addEventListener('click', () => {
+  chartView.percent = percent;
+  $('chart-absolute').setAttribute('aria-pressed', String(!percent)); $('chart-percent').setAttribute('aria-pressed', String(percent));
+  render();
 });
 $('refresh').addEventListener('click', initialize);
 document.addEventListener('click', event => { for (const picker of document.querySelectorAll('.repository-picker, .more-filters')) if (!picker.contains(event.target)) picker.open = false; });
