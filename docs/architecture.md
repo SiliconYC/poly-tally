@@ -17,7 +17,11 @@
 | `poly_tally/lock.py` | POSIX 进程锁，支持 macOS / Linux |
 | `poly_tally/__main__.py` | 手动和定时任务共用命令入口 |
 | `web/model.mjs` | 统一时间轴、过滤与浏览器数据校验 |
-| `web/app.mjs` | 静态图表与交互 |
+| `web/app.mjs` | 全局筛选、概览卡片与仓库表交互 |
+| `web/stacked-chart.mjs` | 按仓库堆叠面积、图例、快照明细与时间刷选 |
+| `web/language-chart.mjs` | 语言环形饼图与可筛选明细 |
+| `web/insights.mjs` | 可比仓库月度净变化与列表 CSV 导出 |
+| `web/chart-utils.mjs` | 图表 DOM、格式与配色 |
 | `scripts/state.mjs` | 本项目专用 `tally-state` 分支持久化，不接触源仓库 |
 | `scripts/metrics.mjs` | 私有公开快照严格校验、范围保护与混合数据合并 |
 
@@ -44,7 +48,7 @@
 
 上述提交字段只适用于公开仓库。私有记录使用 `visibility: private`、`snapshotKind: daily` 和稳定标识，`name` 按用户要求保留真实仓库名，`url` / `branch` / `head` 为 `null`；其 `history` 只有 `timestamp`、`metrics`、`languages`。`publication` 单独保存私有采集时间、来源与可用状态。私有快照包的字段白名单与合并逻辑由 `scripts/metrics.mjs` 校验，兼容旧匿名显示名，但不能把完整私有状态当作快照包上传。
 
-浏览器对各仓库按归一化时点进行阶梯合并，某仓库第一条快照之前视为零，其后保持最后已知状态。某一仓库的同刻提交以拓扑中最后一个为准；所有仓库同刻更新后再输出一个观察点。
+浏览器对各仓库按归一化时点进行阶梯合并，某仓库第一条快照之前为未知，不贡献已知存量面积；其后保持最后已知状态。某一仓库的同刻提交以拓扑中最后一个为准；所有仓库同刻更新后再输出一个观察点。
 
 ## 故障边界
 

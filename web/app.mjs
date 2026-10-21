@@ -1,20 +1,17 @@
+import {monthlyChanges, repositoryCsv, renderMonthlyChanges} from './insights.mjs';
 import {renderLanguageChart} from './language-chart.mjs';
 import {renderStackedChart} from './stacked-chart.mjs';
 import {repositoryColors} from './chart-utils.mjs';
-import { METRIC_LABELS, STATUS_LABELS, aggregateHistory, selectRepositories, latestTotals, languageTotals, loadStats, publicationSummary, repositoryVisibility, repositoryDisplayName, sortRepositories, repositoryOptions, stockChange } from './model.mjs';
+import { METRIC_LABELS, selectRepositories, latestTotals, languageTotals, loadStats, publicationSummary, repositoryVisibility, repositoryDisplayName, repositoryOptions, stockChange } from './model.mjs';
 
 const $ = id => document.getElementById(id);
 const format = number => new Intl.NumberFormat('zh-CN').format(number);
-const compact = number => new Intl.NumberFormat('zh-CN', { notation: 'compact', maximumFractionDigits: 1 }).format(number);
 const dateFormat = new Intl.DateTimeFormat('zh-CN', { timeZone: 'UTC', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
-const shortDate = new Intl.DateTimeFormat('zh-CN', { timeZone: 'UTC', month: '2-digit', day: '2-digit' });
 const formatDate = value => Number.isFinite(Date.parse(value)) ? dateFormat.format(new Date(value)) : '尚未成功';
-const palette = ['#2563eb', '#7c6ad8', '#0d9488', '#d89a40', '#df7280', '#5c9eca', '#7cab68', '#94a3b8'];
-const languageColors = { Python: '#4485d8', JavaScript: '#e0b34b', TypeScript: '#7e72d4', Rust: '#d58d69', Go: '#59aebc', Markdown: '#8da2ba', HTML: '#df8591', CSS: '#9a85cd', Shell: '#6aaf96' };
 let data;
 let colors;
 const chartView = {hidden: new Set(), range: null, percent: false};
-const state = { mode: 'current', ids: [], scope: 'all', language: 'all', metric: 'code', period: 'all', includeStale: false, tableSort: 'name', tableDirection: 'asc', pickerSort: 'name-asc', query: '', languageSort: 'value-desc' };
+const state = { mode: 'current', ids: [], scope: 'all', language: 'all', metric: 'code', period: 'all', includeStale: false, tableSort: 'total', tableDirection: 'desc', tableQuery: '', pickerSort: 'name-asc', query: '', languageSort: 'value-desc' };
 
 function element(tag, className, text) {
   const node = document.createElement(tag);
@@ -22,13 +19,6 @@ function element(tag, className, text) {
   if (text !== undefined) node.textContent = text;
   return node;
 }
-function svgElement(tag, attributes = {}, text) {
-  const node = document.createElementNS('http://www.w3.org/2000/svg', tag);
-  for (const [key, value] of Object.entries(attributes)) node.setAttribute(key, value);
-  if (text !== undefined) node.textContent = text;
-  return node;
-}
-function badge(text, style = '') { return element('span', `status-badge ${style}`, text); }
 function repositoryLink(repository) {
   const name = element('span', 'repo-name', repositoryDisplayName(repository));
   if (repositoryVisibility(repository) === 'private') return name;
@@ -121,6 +111,12 @@ function render() {
   $('repository-label').textContent = state.ids.length === data.repositories.length ? '全部仓库' : `已选 ${state.ids.length} 个仓库`;
   $('stat-label').textContent = '当前' + METRIC_LABELS[state.metric];
   $('stat-total').textContent = format(total[state.metric]);
+  for (const button of document.querySelectorAll('[data-card]')) {
+    const key = button.dataset.card;
+    button.querySelector('.metric-value').textContent = format(total[key]);
+    button.querySelector('.metric-context').textContent = key === 'total' ? '含代码、注释、文档与空行' : key === 'files' ? '已识别的文本文件' : total.total ? (total[key] / total.total * 100).toFixed(1) + '% 的总行数' : '0.0% 的总行数';
+    button.setAttribute('aria-pressed', String(key === state.metric));
+  }
   const privateCount = selected.filter(repository => repositoryVisibility(repository) === 'private').length;
   $('stat-context').textContent = format(selected.length) + ' 个仓库 · 公开 ' + format(selected.length - privateCount) + ' / 私有 ' + format(privateCount) + ' · 最新已知快照';
   const filtered = [state.scope === 'all' ? '' : state.scope === 'private' ? '仅私有仓库' : '仅公开仓库', state.language === 'all' ? '' : state.language, state.mode === 'archive' ? '历史档案' : '', state.includeStale ? '含过期快照' : ''].filter(Boolean);
@@ -146,6 +142,10 @@ function render() {
   const until = data.generatedAt;
   const since = state.period === 'all' ? undefined : new Date(Date.parse(until) - Number(state.period) * 86400000).toISOString();
   renderStackedChart({container: $('chart'), navigator: $('chart-navigator'), legend: $('chart-legend'), details: $('chart-details'), rangeLabel: $('chart-range'), repositories: selected, colors, metric: state.metric, label: METRIC_LABELS[state.metric], language: state.language, since, until, view: chartView});
+  $('monthly-title').textContent = `月度${METRIC_LABELS[state.metric]}净变化`;
+  renderMonthlyChanges({container: $('monthly-chart'), details: $('monthly-details'), months: monthlyChanges(selected, {since, until, metric:state.metric, language:state.language}), label: METRIC_LABELS[state.metric], onSelect: month => {
+    chartView.range = [Date.parse(month.since), Date.parse(month.until)]; render(); $('timeline-title').scrollIntoView({block: 'start', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth'});
+  }});
   renderLanguages(selected);
   renderTable();
   const changeDays = state.period === 'all' ? 30 : Number(state.period);
@@ -167,17 +167,24 @@ function renderLanguages(repositories) {
     state.language = name; $('language').value = name; render();
   }});
 }
+function tableRepositories() {
+  return repositoryOptions(selectRepositories(data, state), {query: state.tableQuery, key: state.tableSort, direction: state.tableDirection, metric: state.metric, language: state.language});
+}
 function renderTable() {
-  const repositories = sortRepositories(selectRepositories(data, state), { key: state.tableSort, direction: state.tableDirection, metric: state.metric, language: state.language });
+  const repositories = tableRepositories();
   for (const button of document.querySelectorAll('[data-sort]')) {
     const active = button.dataset.sort === state.tableSort;
     button.closest('th').setAttribute('aria-sort', active ? state.tableDirection === 'asc' ? 'ascending' : 'descending' : 'none');
     button.lastElementChild.textContent = active ? state.tableDirection === 'asc' ? '↑' : '↓' : '↕';
   }
   $('repository-count').textContent = format(repositories.length);
+  $('export-csv').disabled = !repositories.length;
+  const totals = latestTotals(repositories, state.language);
+  $('repository-totals').replaceChildren(element('th', '', '当前列表合计'));
+  for (const key of ['total', 'code', 'comment', 'documentation', 'blank', 'files']) $('repository-totals').append(element('td', 'repo-number', format(totals[key])));
   const tbody = $('repository-table'); tbody.replaceChildren();
   if (!repositories.length) {
-    const row = element('tr'), cell = element('td', 'empty-table', data.repositories.length ? '没有选中的仓库，请调整筛选范围。' : '暂无仓库；等待首次成功采集。');
+    const row = element('tr'), cell = element('td', 'empty-table', state.tableQuery ? '没有匹配的仓库，请调整搜索内容。' : data.repositories.length ? '没有选中的仓库，请调整筛选范围。' : '暂无仓库；等待首次成功采集。');
     cell.colSpan = 7; row.append(cell); tbody.append(row);
   }
   for (const repository of repositories) {
@@ -214,7 +221,7 @@ for (const [id, checked] of [['select-all', true], ['select-none', false]]) $(id
 $('reset-filters').addEventListener('click', () => {
   chartView.hidden.clear(); chartView.range = null; chartView.percent = false;
   $('chart-absolute').setAttribute('aria-pressed', 'true'); $('chart-percent').setAttribute('aria-pressed', 'false');
-  state.ids = data.repositories.map(repository => repository.id); state.scope = 'all'; state.language = 'all'; state.metric = 'code'; state.period = 'all'; state.includeStale = false; state.mode = 'current'; state.query = ''; state.pickerSort = 'name-asc'; state.tableSort = 'name'; state.tableDirection = 'asc'; state.languageSort = 'value-desc';
+  state.ids = data.repositories.map(repository => repository.id); state.scope = 'all'; state.language = 'all'; state.metric = 'code'; state.period = 'all'; state.includeStale = false; state.mode = 'current'; state.query = ''; state.pickerSort = 'name-asc'; state.tableSort = 'total'; state.tableDirection = 'desc'; state.tableQuery = ''; $('table-search').value = ''; state.languageSort = 'value-desc';
   $('repository-search').value = ''; $('repository-sort').value = 'name-asc'; $('language-sort').value = 'value-desc';
   for (const id of ['scope', 'language', 'metric', 'period']) $(id).value = state[id];
   $('include-stale').checked = false;
@@ -234,6 +241,14 @@ for (const [id, percent] of [['chart-absolute', false], ['chart-percent', true]]
   chartView.percent = percent;
   $('chart-absolute').setAttribute('aria-pressed', String(!percent)); $('chart-percent').setAttribute('aria-pressed', String(percent));
   render();
+});
+$('table-search').addEventListener('input', event => {state.tableQuery = event.target.value; renderTable();});
+for (const button of document.querySelectorAll('[data-card]')) button.addEventListener('click', () => {state.metric = button.dataset.card; $('metric').value = state.metric; render();});
+$('export-csv').addEventListener('click', () => {
+  const blob = new Blob([repositoryCsv(tableRepositories(), state.language)], {type: 'text/csv;charset=utf-8;'});
+  const url = URL.createObjectURL(blob);
+  const link = element('a'); link.href = url; link.download = `poly-tally-${data.generatedAt.slice(0, 10)}.csv`;
+  document.body.append(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000);
 });
 $('refresh').addEventListener('click', initialize);
 document.addEventListener('click', event => { for (const picker of document.querySelectorAll('.repository-picker, .more-filters')) if (!picker.contains(event.target)) picker.open = false; });
