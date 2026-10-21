@@ -4,7 +4,7 @@ import {pathToFileURL} from 'node:url';
 
 const metricKeys = ['code', 'comment', 'blank', 'documentation', 'files'];
 const statuses = new Set(['active', 'archived', 'empty', 'cold', 'excluded', 'inaccessible', 'stale']);
-const languages = new Set(['Python', 'JavaScript', 'TypeScript', 'TSX', 'C', 'C++', 'CUDA', 'C#', 'Java', 'Kotlin', 'Swift', 'Go', 'Rust', 'Ruby', 'PHP', 'Vue', 'Svelte', 'HTML', 'CSS', 'SCSS', 'Less', 'Bash', 'PowerShell', 'Batchfile', 'SQL', 'R', 'Lua', 'Dart', 'JSON', 'YAML', 'TOML', 'INI', 'XML', 'Protocol Buffer', 'QML', 'CMake', 'Makefile', 'Dockerfile', 'Markdown', 'reStructuredText', 'Text', 'TeX']);
+const languages = new Set(['Python', 'Cython', 'JavaScript', 'TypeScript', 'TSX', 'C', 'C++', 'CUDA', 'C#', 'Java', 'Kotlin', 'Swift', 'Go', 'Rust', 'Ruby', 'PHP', 'Vue', 'Svelte', 'HTML', 'CSS', 'SCSS', 'Less', 'Bash', 'PowerShell', 'Batchfile', 'SQL', 'R', 'Lua', 'Dart', 'JSON', 'YAML', 'TOML', 'INI', 'XML', 'Protocol Buffer', 'QML', 'CMake', 'Makefile', 'Dockerfile', 'Markdown', 'reStructuredText', 'Text', 'TeX']);
 const notice = '私有仓库：仅公开按日规模，不公开源码与提交详情。';
 const anonymousKey = id => createHash('sha256').update(`poly-tally/repository/${id}`).digest('hex').slice(0, 16);
 const repositoryKeys = ['id', 'name', 'sourceKey', 'visibility', 'snapshotKind', 'url', 'branch', 'head', 'status', 'lastSuccessAt', 'rulesVersion', 'historyComplete', 'notice', 'skippedFiles', 'history'];

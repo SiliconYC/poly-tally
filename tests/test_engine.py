@@ -1,5 +1,6 @@
 # ◑ 导入
 import copy
+import json
 import os
 from pathlib import Path
 import subprocess
@@ -197,6 +198,25 @@ class Test历史_类(unittest.TestCase):
         全量 = 历史引擎_类(self.根 / "fresh-delete", 规则_类(self.规则配置))
         self.addCleanup(全量.api_关闭)
         self.assertEqual(状态["history"], 全量.api_同步(self.元数据, str(self.源))["history"])
+
+    def test_新规则撤销历史日志飞升而保留源码增长并与全量一致(self) -> None:
+        self._提交({"src/main.ts": "const value = 1;\n"})
+        self._同步()
+        self._提交({"log/loc/scan.json": "[\n" + "1,\n" * 100 + "]\n", "docs/.obsidian/plugins/plugin/main.js": "var dependency = 1;\n" * 50})
+        self._同步()
+        self._提交({"src/main.ts": "const value = 1;\nconst next = 2;\n", "log/loc/scan.json": "[\n" + "2,\n" * 200 + "]\n"})
+        旧状态 = self._同步()
+        self.assertGreater(旧状态["history"][1]["metrics"]["code"], 100)
+        配置 = json.loads((Path(__file__).parents[1] / "config.json").read_text())["rules"]
+        重算 = 历史引擎_类(self.根 / "state", 规则_类(配置))
+        self.addCleanup(重算.api_关闭)
+        新状态 = 重算.api_同步(self.元数据, str(self.源))
+        self.assertEqual([项["metrics"]["code"] for 项 in 新状态["history"]], [1, 1, 2])
+        全量 = 历史引擎_类(self.根 / "fresh-exclusions", 规则_类(配置))
+        self.addCleanup(全量.api_关闭)
+        self.assertEqual(新状态["history"], 全量.api_同步(self.元数据, str(self.源))["history"])
+        重算.api_同步(self.元数据, str(self.源))
+        self.assertEqual(重算.计数["recomputedCommits"], 3)
 
     def test_跳过文件数是当前仓库清单而不是跨仓库运行计数(self) -> None:
         self._提交({"a.py": "x=1\n", "pointer.py": "version https://git-lfs.github.com/spec/v1\noid sha256:aaa\nsize 12\n"})

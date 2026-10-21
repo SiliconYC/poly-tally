@@ -2,6 +2,7 @@
 from pygments.lexers import get_lexer_by_name
 from pygments.token import Comment, String
 
+from poly_tally.content_policy import 内容策略_类
 from poly_tally.rules import 规则_类
 
 
@@ -28,6 +29,8 @@ class 行统计_类:
             return None
         # 不引入隐式编码猜测；非 UTF-8 内容明确排除并计入 skippedBlobs。
         文本 = 文本.replace("\r\n", "\n").replace("\r", "\n")
+        if 内容策略_类.api_排除原因(文本, arg_语言) is not None:
+            return None
         行表 = 文本.split("\n")
         if 行表[-1] == "":
             行表.pop()

@@ -16,9 +16,10 @@ class 规则_类:
     2026.10.21 - 建立统一口径，Entrepi 与其他 Markdown 同归文档。
     """
 
-    统计器版本 = f"poly-tally/1;pygments/{pygments.__version__}"
+    统计器版本 = f"poly-tally/4;pygments/{pygments.__version__}"
     默认语言 = {
-        ".py": "Python", ".pyi": "Python", ".js": "JavaScript", ".jsx": "JavaScript",
+        ".py": "Python", ".pyi": "Python", ".pyx": "Cython", ".pxd": "Cython", ".pxi": "Cython",
+        ".js": "JavaScript", ".jsx": "JavaScript",
         ".mjs": "JavaScript", ".cjs": "JavaScript", ".ts": "TypeScript", ".tsx": "TSX",
         ".c": "C", ".h": "C", ".cpp": "C++", ".hpp": "C++", ".cc": "C++", ".cu": "CUDA",
         ".cs": "C#", ".java": "Java", ".kt": "Kotlin", ".swift": "Swift", ".go": "Go",
@@ -33,7 +34,7 @@ class 规则_类:
     }
     文档语言 = {"Markdown", "reStructuredText", "Text", "TeX"}
     词法名 = {
-        "Python": "python", "JavaScript": "javascript", "TypeScript": "typescript", "TSX": "tsx",
+        "Python": "python", "Cython": "cython", "JavaScript": "javascript", "TypeScript": "typescript", "TSX": "tsx",
         "C": "c", "C++": "cpp", "CUDA": "cuda", "C#": "csharp", "Java": "java", "Kotlin": "kotlin",
         "Swift": "swift", "Go": "go", "Rust": "rust", "Ruby": "ruby", "PHP": "php", "Vue": "vue",
         # 固定版本没有 Svelte 词法器；HTML 近似保留其嵌入 script/style 的注释分类。
@@ -64,6 +65,11 @@ class 规则_类:
 
     def api_语言(self, arg_路径: str) -> str | None:
         if any(self.api_匹配(arg_路径, 项) for 项 in self.配置["exclude"]):
+            return None
+        产物规则 = self.配置["artifact_exclude"] if "artifact_exclude" in self.配置 else []
+        源码保护 = self.配置["source_preserve"] if "source_preserve" in self.配置 else []
+        # 结果文件名有歧义，源码/测试上下文可保留；依赖等明确排除不受保护覆盖。
+        if any(self.api_匹配(arg_路径, 项) for 项 in 产物规则) and not any(self.api_匹配(arg_路径, 项) for 项 in 源码保护):
             return None
         if not any(self.api_匹配(arg_路径, 项) for 项 in self.配置["include"]):
             return None
