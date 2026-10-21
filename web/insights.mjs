@@ -41,6 +41,13 @@ export function repositoryCsv(repositories, language = 'all') {
   return '\ufeff' + rows.map(row => row.map(escape).join(',')).join('\r\n') + '\r\n';
 }
 
+// Keep the latest month visible without crowding it with the previous label.
+export function monthLabelIndices(count, stride) {
+  if (count <= 0) return [];
+  const step = Math.max(1, Math.ceil(75 / Math.max(1, stride)));
+  return Array.from({length: count}, (_, index) => index).filter(index => index === count - 1 || (index % step === 0 && count - 1 - index >= step));
+}
+
 export function renderMonthlyChanges({container, details, months, label, onSelect}) {
   container.replaceChildren(); details.replaceChildren();
   if (!months.length) { container.append(element('p', 'chart-empty', '当前范围没有可用历史')); return; }
@@ -57,6 +64,7 @@ export function renderMonthlyChanges({container, details, months, label, onSelec
   const show = month => {
     details.replaceChildren(element('strong', month.change < 0 ? 'negative' : '', `${month.month}${month.partial ? ' · 部分月份' : ''}　${month.change === null ? '暂无可比数据' : `${month.change > 0 ? '+' : ''}${format(month.change)} ${label}`}`), element('span', '', `${month.compared} 个可比仓库${month.missing ? ` · ${month.missing} 个缺少期初快照，未参与计算` : ' · 所选仓库均可比'} · ${dateLabel(month.since)} — ${dateLabel(month.until)} UTC`));
   };
+  const labelIndices = new Set(monthLabelIndices(months.length, stride));
   months.forEach((month, index) => {
     const x = left + stride * (index + .5);
     const bar = svgElement('rect', {x: x - barWidth / 2, y: month.change === null ? zero - 2 : Math.min(zero, y(month.change)), width:barWidth, height:month.change === null || month.change === 0 ? 3 : Math.abs(y(month.change) - zero), rx:2, fill:month.change === null ? '#cbd3c6' : month.change < 0 ? '#c58b81' : '#66a08c', tabindex:0, role:'button', class:'monthly-bar', 'aria-label': `${month.month}，${month.change === null ? '暂无可比数据' : `${month.change} ${label}`}，${month.compared} 个可比仓库，${month.missing} 个缺少期初。点击缩放趋势图。`});
@@ -65,7 +73,7 @@ export function renderMonthlyChanges({container, details, months, label, onSelec
     bar.addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onSelect(month); } });
     bar.append(svgElement('title', {}, `${month.month} · ${month.change === null ? '无可比数据' : `${month.change > 0 ? '+' : ''}${format(month.change)} ${label}`} · ${month.compared} 个可比仓库`));
     svg.append(bar);
-    if (width > 600 || months.length <= 6 || index % 2 === 0 || index === months.length - 1) svg.append(svgElement('text', {x, y:height-9, 'text-anchor':'middle', class:'chart-tick'}, month.month));
+    if (labelIndices.has(index)) svg.append(svgElement('text', {x, y:height-9, 'text-anchor':'middle', class:'chart-tick'}, month.month));
   });
   container.append(svg); show(months.at(-1));
 }
