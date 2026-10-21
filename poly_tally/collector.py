@@ -28,6 +28,7 @@ class 采集器_类:
         arg_目录: Path,
         arg_令牌: str | None,
         arg_仅公开: bool,
+        arg_仅私有: bool = False,
     ) -> None:
         self.配置 = arg_配置
         if not arg_配置["owners"]:
@@ -36,6 +37,7 @@ class 采集器_类:
         self.引擎 = 历史引擎_类(arg_目录, self.规则)
         self.发现器 = GitHub发现器_类(arg_令牌, arg_仅公开)
         self.仅公开 = arg_仅公开
+        self.仅私有 = arg_仅私有
 
     def api_采集(self) -> dict:
         开始 = time.monotonic()
@@ -66,6 +68,8 @@ class 采集器_类:
         for 元数据 in 元数据表:
             ID = str(元数据["id"])
             已见.add(ID)
+            if self.仅私有 and not 元数据["private"]:
+                continue
             旧状态 = 已知[ID] if ID in 已知 else None
             if 旧状态:
                 旧状态.update({"private": 元数据["private"], "name": 元数据["full_name"], "url": f"https://github.com/{元数据['full_name']}"})
@@ -108,6 +112,8 @@ class 采集器_类:
                     for 键 in 公开计数:
                         公开计数[键] += self.引擎.计数[键] - 仓库基线[键]
         for ID, 状态 in 已知.items():
+            if self.仅私有 and not 状态["private"]:
+                continue
             if ID in 已见:
                 continue
             if 状态["status"] == "cold":

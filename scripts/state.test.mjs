@@ -1,0 +1,124 @@
+import assert from 'node:assert/strict';
+import {mkdtemp, readFile, writeFile, rm} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import test from 'node:test';
+import {validatePrivateMetrics} from './metrics.mjs';
+
+const envelope = {schemaVersion: 1, generatedAt: '2026-10-21T04:00:00Z', rulesVersion: '0123456789abcdef', source: 'local', collection: {repositories: 0, failed: 0}, repositories: []};
+const checkpoint = {schemaVersion: 1, repositories: [{id: '1', private: false}]};
+const bytes = data => Buffer.from(JSON.stringify(data));
+function github(files = {}, {missing = false} = {}) {
+  const requests = [];
+  return {requests, fetcher: async (url, options) => {
+    const path = new URL(url).pathname.replace('/repos/owner/project', '');
+    const body = options.body ? JSON.parse(options.body) : undefined;
+    requests.push({path, method: options.method, body, headers: options.headers});
+    let result;
+    if (path === '/git/ref/heads/tally-state') {
+      if (missing) return new Response('{}', {status: 404});
+      result = {object: {sha: 'existing-commit'}};
+    } else if (path === '/git/commits/existing-commit') result = {tree: {sha: 'existing-tree'}};
+    else if (path === '/git/trees/existing-tree') result = {tree: Object.keys(files).map(name => ({path: name, sha: `blob-${name}`, type: 'blob'}))};
+    else if (path.startsWith('/git/blobs/blob-')) {
+      const name = path.slice('/git/blobs/blob-'.length);
+      result = {content: bytes(files[name]).toString('base64'), encoding: 'base64'};
+    } else if (path === '/git/blobs' && options.method === 'POST') result = {sha: 'new-blob'};
+    else if (path === '/git/trees' && options.method === 'POST') result = {sha: 'new-tree'};
+    else if (path === '/git/commits' && options.method === 'POST') result = {sha: 'new-commit'};
+    else if (path.startsWith('/git/refs')) result = {};
+    else throw new Error(`Unexpected test request ${options.method} ${path}`);
+    return Response.json(result);
+  }};
+}
+async function run(t, command, firstData, secondData, remote = {}, extra = {}) {
+  const directory = await mkdtemp(join(tmpdir(), 'tally-state-test-'));
+  t.after(() => rm(directory, {recursive: true, force: true}));
+  const filename = join(directory, 'first.json');
+  const privateFilename = join(directory, 'private.json');
+  if (firstData) await writeFile(filename, bytes(firstData));
+  if (secondData) await writeFile(privateFilename, bytes(secondData));
+  const api = github(remote, extra);
+  const logs = [];
+  const {runState} = await import('./state.mjs');
+  await runState(command, filename, extra.noPrivate ? undefined : privateFilename, {env: {GITHUB_REPOSITORY: 'owner/project', GH_TOKEN: 'secret-token'}, fetcher: api.fetcher, logger: {log: text => logs.push(text)}});
+  return {filename, privateFilename, logs, ...api};
+}
+
+test('restore keeps bundled private fallback when no durable branch or private file exists', async t => {
+  const result = await run(t, 'restore', null, envelope, {}, {missing: true});
+  assert.deepEqual(JSON.parse(await readFile(result.privateFilename)), envelope);
+  const existingPublic = await run(t, 'restore', null, envelope, {'checkpoint.json': checkpoint});
+  assert.deepEqual(JSON.parse(await readFile(existingPublic.filename)), checkpoint);
+  assert.deepEqual(JSON.parse(await readFile(existingPublic.privateFilename)), envelope);
+});
+
+test('restore validates and writes private metrics alongside the public checkpoint', async t => {
+  const result = await run(t, 'restore', null, null, {'checkpoint.json': checkpoint, 'private-metrics.json': envelope});
+  assert.deepEqual(JSON.parse(await readFile(result.filename)), checkpoint);
+  assert.deepEqual(JSON.parse(await readFile(result.privateFilename)), envelope);
+  const privateOnly = await run(t, 'restore', null, null, {'private-metrics.json': envelope});
+  assert.deepEqual(JSON.parse(await readFile(privateOnly.privateFilename)), envelope);
+});
+
+test('local save-private updates only the sanitized blob while preserving the checkpoint tree', async t => {
+  const result = await run(t, 'save-private', envelope, null, {'checkpoint.json': checkpoint}, {noPrivate: true});
+  const tree = result.requests.find(request => request.path === '/git/trees' && request.method === 'POST').body;
+  assert.equal(tree.base_tree, 'existing-tree');
+  assert.deepEqual(tree.tree.map(entry => entry.path), ['private-metrics.json']);
+  const blobs = result.requests.filter(request => request.path === '/git/blobs' && request.method === 'POST');
+  assert.deepEqual(JSON.parse(Buffer.from(blobs[0].body.content, 'base64')), envelope);
+  assert.equal(result.requests[0].headers.Authorization, 'Bearer secret-token');
+  assert.ok(result.logs.every(log => !log.includes('secret-token')));
+});
+
+test('combined save writes both whitelisted state filenames and refuses raw private checkpoint records', async t => {
+  const result = await run(t, 'save', checkpoint, envelope, {});
+  const tree = result.requests.find(request => request.path === '/git/trees' && request.method === 'POST').body;
+  assert.deepEqual(tree.tree.map(entry => entry.path), ['checkpoint.json', 'private-metrics.json']);
+  await assert.rejects(run(t, 'save', {schemaVersion: 1, repositories: [{private: true}]}, envelope, {}), /private checkpoint/);
+});
+
+test('invalid or partial private snapshots cannot replace durable metrics', async t => {
+  const unsafe = {...envelope, privatePath: 'SENSITIVE-secret/path'};
+  await assert.rejects(run(t, 'save-private', unsafe, null, {'private-metrics.json': envelope}, {noPrivate: true}), error => !error.message.includes('SENSITIVE'));
+  const key = 'fedcba9876543210';
+  const partial = {...envelope, collection: {repositories: 1, failed: 1}, repositories: [{id: `private-${key}`, sourceKey: key, name: `私有仓库 · ${key.slice(0, 6)}`, visibility: 'private', snapshotKind: 'daily', url: null, branch: null, head: null, status: 'inaccessible', lastSuccessAt: null, rulesVersion: envelope.rulesVersion, historyComplete: false, notice: '私有仓库：仅公开按日规模，不公开源码与提交详情。', skippedFiles: 0, history: []}]};
+  assert.equal(validatePrivateMetrics(partial), true);
+  await assert.rejects(run(t, 'save-private', partial, null, {'private-metrics.json': envelope}, {noPrivate: true}), /incomplete/);
+});
+
+test('identical semantic private metrics do not create scan-only data commits', async t => {
+  const newer = {...envelope, generatedAt: '2026-10-21T05:00:00Z'};
+  const result = await run(t, 'save-private', newer, null, {'private-metrics.json': envelope}, {noPrivate: true});
+  assert.equal(result.requests.filter(request => request.method !== 'GET').length, 0);
+});
+
+test('publishing reads a local helper only with the explicit credential option', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'tally-credential-test-'));
+  t.after(() => rm(directory, {recursive: true, force: true}));
+  const filename = join(directory, 'private.json');
+  await writeFile(filename, bytes(envelope));
+  const {runState} = await import('./state.mjs');
+  const api = github({}, {missing: true});
+  let reads = 0;
+  const credentialReader = () => { reads++; return 'helper-secret'; };
+  const options = {env: {GITHUB_REPOSITORY: 'owner/project'}, fetcher: api.fetcher, logger: {log() {}}, credentialReader};
+  await assert.rejects(runState('save-private', filename, undefined, options), /GH_TOKEN/);
+  assert.equal(reads, 0);
+  await runState('save-private', filename, undefined, {...options, gitCredential: true});
+  assert.equal(reads, 1);
+  assert.equal(api.requests[0].headers.Authorization, 'Bearer helper-secret');
+});
+
+test('durable publication refuses a smaller token scope even when the scan reports zero failures', async t => {
+  const previous = {...envelope, collection: {repositories: 1, failed: 0}, repositories: [{id: 'private-fedcba9876543210', sourceKey: 'fedcba9876543210', name: '私有仓库 · fedcba', visibility: 'private', snapshotKind: 'daily', url: null, branch: null, head: null, status: 'active', lastSuccessAt: null, rulesVersion: envelope.rulesVersion, historyComplete: true, notice: '私有仓库：仅公开按日规模，不公开源码与提交详情。', skippedFiles: 0, history: []}]};
+  await assert.rejects(run(t, 'save-private', envelope, null, {'private-metrics.json': previous, 'checkpoint.json': checkpoint}, {noPrivate: true}), /scope/);
+  await assert.rejects(run(t, 'save', checkpoint, envelope, {'private-metrics.json': previous}), /scope/);
+});
+
+test('local and combined durable publication reject a complete scan older than the stored snapshot', async t => {
+  const older = {...envelope, generatedAt: '2026-10-20T04:00:00Z'};
+  await assert.rejects(run(t, 'save-private', older, null, {'private-metrics.json': envelope}, {noPrivate: true}), /older/);
+  await assert.rejects(run(t, 'save', checkpoint, older, {'private-metrics.json': envelope}), /older/);
+});

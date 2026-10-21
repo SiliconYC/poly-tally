@@ -1,4 +1,4 @@
-import { METRIC_LABELS, STATUS_LABELS, aggregateHistory, selectRepositories, latestTotals, languageTotals, loadStats } from './model.mjs';
+import { METRIC_LABELS, STATUS_LABELS, aggregateHistory, selectRepositories, latestTotals, languageTotals, loadStats, publicationSummary, repositoryVisibility } from './model.mjs';
 
 const $ = id => document.getElementById(id);
 const format = number => new Intl.NumberFormat('zh-CN').format(number);
@@ -9,7 +9,7 @@ const formatDate = value => Number.isFinite(Date.parse(value)) ? dateFormat.form
 const palette = ['#9de7cb', '#d9b98c', '#91b5e7', '#ada7df', '#db9d9a', '#81bfc8', '#c4cc91', '#9faab8'];
 const languageColors = { Python: '#d9b98c', JavaScript: '#c4cc91', TypeScript: '#91b5e7', Rust: '#db9d9a', Go: '#81bfc8', Markdown: '#ada7df', HTML: '#d7a780', CSS: '#99a5e7', Shell: '#9de7cb' };
 let data;
-const state = { mode: 'current', ids: [], language: 'all', metric: 'code', period: 'all', includeStale: false };
+const state = { mode: 'current', ids: [], scope: 'all', language: 'all', metric: 'code', period: 'all', includeStale: false };
 
 function element(tag, className, text) {
   const node = document.createElement(tag);
@@ -26,6 +26,7 @@ function svgElement(tag, attributes = {}, text) {
 function badge(text, style = '') { return element('span', `status-badge ${style}`, text); }
 function repositoryLink(repository) {
   const name = element('span', 'repo-name', repository.name);
+  if (repositoryVisibility(repository) === 'private') return name;
   try {
     const url = new URL(repository.url);
     if (url.protocol === 'https:' && url.hostname === 'github.com') {
@@ -52,11 +53,12 @@ async function initialize() {
     populateFilters();
     $('load-state').hidden = true;
     $('dashboard').hidden = false;
-    const time = document.createTextNode(`更新于 ${formatDate(data.generatedAt)}`);
-    $('updated-at').replaceChildren(time, element('small', '', 'UTC · 统一口径 · 默认分支历史'));
+    const time = document.createTextNode(`数据发布于 ${formatDate(data.generatedAt)}`);
+    $('updated-at').replaceChildren(time, element('small', '', 'UTC · 私有采集时间单独列示'));
     $('rules-description').textContent = `规则 ${data.rules.version} · ${data.rules.description ?? '所有纳入仓库采用相同统计规则。'}`;
     $('footer-version').textContent = `采集器 ${data.collector?.version ?? '—'} · 规则 ${data.rules.version}`;
     render();
+    renderPublication();
     renderRun();
   } catch (error) {
     const retry = element('button', 'retry-button', '重新加载');
@@ -64,6 +66,13 @@ async function initialize() {
     $('load-state').replaceChildren(element('span', 'state-symbol', '↻'), element('h2', '', '暂时无法读取统计数据'), element('p', '', `${error.message || '连接失败'} 请检查网络，或等待首次采集与发布完成后重试。`), retry);
     $('updated-at').replaceChildren(document.createTextNode('数据尚未就绪'), element('small', '', '可稍后重新加载'));
   } finally { $('refresh').disabled = false; }
+}
+function renderPublication() {
+  const summary = publicationSummary(data);
+  $('publication-counts').textContent = `已发布 ${format(summary.publicRepositories)} 个公开仓库 + ${format(summary.privateRepositories)} 个私有仓库`;
+  const source = { local: '本地采集', 'github-actions': 'GitHub Actions' }[summary.privateSource];
+  const status = { available: '可用', 'not-configured': '未配置私有采集凭据', stale: '保留旧指标，尚未刷新' }[summary.privateStatus] ?? '采集状态未知';
+  $('private-updated-at').textContent = `私有指标：${status} · 最后成功 ${summary.privateUpdatedAt ? `${formatDate(summary.privateUpdatedAt)} UTC` : '尚无独立采集时间'}${source ? ` · ${source}` : ''}${summary.privateRepositories ? '' : ' · 尚无已发布私有指标'}`;
 }
 function populateFilters() {
   const options = $('repository-options');
@@ -90,31 +99,34 @@ function populateFilters() {
 }
 function render() {
   const selected = selectRepositories(data, state);
+  const scoped = data.repositories.filter(repository => state.scope === 'all' || repositoryVisibility(repository) === state.scope);
   const total = latestTotals(selected, state.language);
   $('current-view').classList.toggle('selected', state.mode === 'current');
   $('archive-view').classList.toggle('selected', state.mode === 'archive');
   $('current-view').setAttribute('aria-pressed', String(state.mode === 'current'));
   $('archive-view').setAttribute('aria-pressed', String(state.mode === 'archive'));
-  $('scope-description').textContent = state.mode === 'current' ? '当前可用仓库的默认分支历史' : '包含已退役仓库的同口径历史快照';
+  $('scope-description').textContent = state.mode === 'current' ? '当前可用仓库 · 公开提交 / 私有按日规模' : '包含已退役仓库的同口径历史快照';
   $('repository-label').textContent = state.ids.length === data.repositories.length ? '全部仓库' : `已选 ${state.ids.length} 个仓库`;
   $('stat-code').textContent = format(total.code);
   $('stat-documentation').textContent = format(total.documentation);
   $('stat-comment').textContent = `${format(total.comment)} 注释行 · ${format(total.blank)} 空行`;
   $('stat-repositories').replaceChildren(document.createTextNode(format(selected.length)), element('span', '', '个'));
   $('stat-files').textContent = `${format(total.files)} 个已统计文件`;
+  const privateCount = selected.filter(repository => repositoryVisibility(repository) === 'private').length;
+  $('stat-repository-scope').textContent = `公开 ${format(selected.length - privateCount)} · 私有 ${format(privateCount)}`;
   $('stat-commits').textContent = format(selected.reduce((sum, repository) => sum + repository.history.length, 0));
   const messages = [];
   if (!data.repositories.length) messages.push('尚无可发布的仓库数据。首次成功采集后，这里会自动呈现默认分支历史。');
-  const mismatched = data.repositories.filter(repository => state.ids.includes(repository.id) && repository.rulesVersion !== data.rules.version && repository.history.length);
+  const mismatched = scoped.filter(repository => state.ids.includes(repository.id) && repository.rulesVersion !== data.rules.version && repository.history.length);
   if (mismatched.length) messages.push(`${mismatched.length} 个仓库保留旧规则快照，已隔离出汇总。`);
   const stale = selected.filter(repository => ['stale', 'inaccessible'].includes(repository.status));
   if (stale.length) messages.push(`已明确纳入 ${stale.length} 个过期或不可访问仓库的最后成功快照；它们可能与源仓库当前状态不同。`);
   else {
-    const omitted = data.repositories.filter(repository => state.ids.includes(repository.id) && ['stale', 'inaccessible'].includes(repository.status));
+    const omitted = scoped.filter(repository => state.ids.includes(repository.id) && ['stale', 'inaccessible'].includes(repository.status));
     if (omitted.length) messages.push(`${omitted.length} 个过期或不可访问仓库未纳入汇总，可勾选“包含过期快照”查看同规则的旧数据。`);
   }
   const incomplete = selected.filter(repository => !repository.historyComplete);
-  if (incomplete.length) messages.push(`${incomplete.length} 个仓库的历史尚不完整；曲线仅反映已采集的提交树。`);
+  if (incomplete.length) messages.push(`${incomplete.length} 个仓库的历史尚不完整；曲线仅反映已采集快照。`);
   const cold = selected.filter(repository => repository.status === 'cold');
   if (cold.length) messages.push(`历史档案纳入 ${cold.length} 个冷数据仓库，保留最后成功快照并向后延续。`);
   $('warnings').hidden = !messages.length;
@@ -156,7 +168,7 @@ function renderLanguages(repositories) {
   }
 }
 function renderTable() {
-  const repositories = data.repositories.filter(repository => state.ids.includes(repository.id));
+  const repositories = data.repositories.filter(repository => state.ids.includes(repository.id) && (state.scope === 'all' || repositoryVisibility(repository) === state.scope));
   const eligible = new Set(selectRepositories(data, state).map(repository => repository.id));
   $('repository-count').textContent = format(repositories.length);
   $('table-metric').textContent = METRIC_LABELS[state.metric];
@@ -166,19 +178,20 @@ function renderTable() {
     cell.colSpan = 5; row.append(cell); tbody.append(row);
   }
   for (const repository of repositories) {
+    const isPrivate = repositoryVisibility(repository) === 'private';
     const row = element('tr');
-    const name = element('td'); name.append(repositoryLink(repository), element('span', 'repo-secondary', `⑂ ${repository.branch || '尚无默认分支'}`));
+    const name = element('td'); name.append(repositoryLink(repository), element('span', 'repo-secondary', isPrivate ? '私有 · 按日规模' : `公开 · ⑂ ${repository.branch || '尚无默认分支'}`));
     const value = latestTotals([repository], state.language)[state.metric];
     const metric = element('td', 'repo-number', repository.history.length ? format(value) : '—');
     if (!eligible.has(repository.id)) metric.append(element('small', '', '未汇总'));
     const head = element('td');
-    head.append(element('span', '', repository.head ? repository.head.slice(0, 8) : '—'), element('span', 'repo-secondary', `${formatDate(repository.lastSuccessAt)}${repository.lastSuccessAt ? ' UTC' : ''}`));
+    head.append(element('span', '', isPrivate ? '提交信息不公开' : repository.head ? repository.head.slice(0, 8) : '—'), element('span', 'repo-secondary', `${formatDate(repository.lastSuccessAt)}${repository.lastSuccessAt ? ' UTC' : ''}`));
     const status = element('td');
     const style = ['inaccessible', 'stale'].includes(repository.status) ? 'error-status' : ['active', 'archived'].includes(repository.status) ? '' : 'muted-status';
     status.append(badge(STATUS_LABELS[repository.status] ?? repository.status, style));
     if (repository.notice) { const notice = element('span', 'repo-secondary', repository.notice); notice.title = repository.notice; status.append(notice); }
     const rule = element('td');
-    rule.append(element('span', repository.historyComplete ? 'rule-ok' : 'rule-bad', repository.historyComplete ? '历史完整' : '历史不完整'));
+    rule.append(element('span', repository.historyComplete ? 'rule-ok' : 'rule-bad', isPrivate ? '按日规模快照' : repository.historyComplete ? '提交历史完整' : '提交历史不完整'));
     const matching = repository.rulesVersion === data.rules.version;
     rule.append(element('span', `repo-secondary ${matching ? '' : 'rule-bad'}`, `${repository.rulesVersion || '未知规则'}${matching ? ' · 统一口径' : ' · 旧口径，已隔离'}`));
     row.append(name, metric, head, status, rule); tbody.append(row);
@@ -266,14 +279,14 @@ function renderChart(points) {
 $('current-view').addEventListener('click', () => { state.mode = 'current'; render(); });
 $('archive-view').addEventListener('click', () => { state.mode = 'archive'; render(); });
 $('include-stale').addEventListener('change', event => { state.includeStale = event.target.checked; render(); });
-for (const id of ['language', 'metric', 'period']) $(id).addEventListener('change', event => { state[id] = event.target.value; render(); });
+for (const id of ['scope', 'language', 'metric', 'period']) $(id).addEventListener('change', event => { state[id] = event.target.value; render(); });
 for (const [id, checked] of [['select-all', true], ['select-none', false]]) $(id).addEventListener('click', () => {
   for (const checkbox of $('repository-options').querySelectorAll('input')) checkbox.checked = checked;
   state.ids = checked ? data.repositories.map(repository => repository.id) : []; render();
 });
 $('reset-filters').addEventListener('click', () => {
-  state.ids = data.repositories.map(repository => repository.id); state.language = 'all'; state.metric = 'code'; state.period = 'all'; state.includeStale = false;
-  for (const id of ['language', 'metric', 'period']) $(id).value = state[id];
+  state.ids = data.repositories.map(repository => repository.id); state.scope = 'all'; state.language = 'all'; state.metric = 'code'; state.period = 'all'; state.includeStale = false;
+  for (const id of ['scope', 'language', 'metric', 'period']) $(id).value = state[id];
   $('include-stale').checked = false;
   for (const checkbox of $('repository-options').querySelectorAll('input')) checkbox.checked = true;
   render();

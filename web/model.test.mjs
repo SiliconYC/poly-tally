@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { aggregateHistory, selectRepositories, latestTotals, languageTotals, loadStats } from './model.mjs';
+import * as model from './model.mjs';
 
 const metrics = (code, documentation = 0) => ({ code, comment: 0, blank: 0, documentation, files: 1 });
 const snapshot = (timestamp, code, language = 'Python', documentation = 0) => ({
@@ -10,6 +11,42 @@ const snapshot = (timestamp, code, language = 'Python', documentation = 0) => ({
 const repo = (id, history, extra = {}) => ({ id, name: `owner/${id}`, url: `https://github.com/owner/${id}`, branch: 'main', head: 'abc123', status: 'active', lastSuccessAt: '2026-10-21T00:00:00Z', rulesVersion: 'v1', historyComplete: true, notice: '', history, ...extra });
 const day = n => `2026-10-${String(n).padStart(2, '0')}T00:00:00Z`;
 const dataset = repositories => ({ schemaVersion: 1, generatedAt: day(21), rules: { version: 'v1', description: '统一规则' }, collector: { version: '1' }, summary: {}, repositories, runs: [] });
+const privateRepo = (code = 30, extra = {}) => repo('private-0123456789abcdef', [{ timestamp: day(20), metrics: metrics(code), languages: { Rust: metrics(code) } }], {
+  name: '私有仓库 · 012345', url: null, branch: null, head: null, visibility: 'private', sourceKey: '0123456789abcdef', snapshotKind: 'daily', ...extra,
+});
+
+test('visibility scopes consistently select public commits and private daily metrics under the same rules', () => {
+  const data = dataset([repo('a', [snapshot(day(1), 10)]), privateRepo(), privateRepo(900, { id: 'private-fedcba9876543210', rulesVersion: 'old' })]);
+  const all = selectRepositories(data);
+  const publicOnly = selectRepositories(data, { scope: 'public' });
+  const privateOnly = selectRepositories(data, { scope: 'private' });
+  assert.deepEqual(all.map(r => r.id), ['a', 'private-0123456789abcdef']);
+  assert.deepEqual(publicOnly.map(r => r.id), ['a']);
+  assert.deepEqual(privateOnly.map(r => r.id), ['private-0123456789abcdef']);
+  assert.equal(latestTotals(all).code, 40);
+  assert.equal(latestTotals(privateOnly).code, 30);
+  assert.deepEqual(languageTotals(privateOnly), [{ name: 'Rust', value: 30 }]);
+  assert.deepEqual(aggregateHistory(privateOnly).map(p => [p.timestamp, p.value]), [[day(20), 30]]);
+  assert.deepEqual(selectRepositories(data, { scope: 'private', ids: ['a'] }), []);
+});
+
+test('publication summary counts mixed repositories without treating public refresh as a private update', () => {
+  const data = dataset([repo('a', [snapshot(day(1), 10)]), privateRepo()]);
+  data.publication = { privateRepositories: 1, privateUpdatedAt: day(20), privateSource: 'local', privateStatus: 'stale' };
+  assert.deepEqual(model.publicationSummary?.(data), { publicRepositories: 1, privateRepositories: 1, privateUpdatedAt: day(20), privateStatus: 'stale', privateSource: 'local' });
+  assert.deepEqual(model.publicationSummary?.(dataset([])), { publicRepositories: 0, privateRepositories: 0, privateUpdatedAt: null, privateStatus: 'not-configured', privateSource: null });
+  assert.deepEqual(model.publicationSummary?.(dataset([privateRepo()])), { publicRepositories: 0, privateRepositories: 1, privateUpdatedAt: null, privateStatus: 'stale', privateSource: null });
+});
+
+test('load accepts anonymous daily private snapshots without any commit fields and rejects private commit details', async () => {
+  const data = dataset([privateRepo()]);
+  const load = value => loadStats(async () => ({ ok: true, json: async () => value }));
+  assert.deepEqual(await load(data), data);
+  await assert.rejects(() => load(dataset([privateRepo(30, { head: 'secret-sha' })])), /数据/);
+  const exposed = privateRepo();
+  exposed.history[0].sha = 'secret-sha';
+  await assert.rejects(() => load(dataset([exposed])), /数据/);
+});
 
 test('three repositories align with carry-forward stock, not summed commit increments', () => {
   const repositories = [repo('a', [snapshot(day(1), 10), snapshot(day(3), 16)]), repo('b', [snapshot(day(2), 20)]), repo('c', [snapshot(day(3), 4), snapshot(day(4), 2)])];

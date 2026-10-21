@@ -16,9 +16,82 @@ permissions:
   contents: read
 
 jobs:
+  private:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    outputs:
+      available: ${{ steps.scan.outputs.available || 'false' }}
+      status: ${{ steps.scan.outputs.status || 'not-configured' }}
+    steps:
+      - name: Detect optional read-only source credential
+        id: credential
+        env:
+          READ_TOKEN: ${{ secrets.POLY_TALLY_READ_TOKEN }}
+        run: |
+          if [ -n "$READ_TOKEN" ]; then
+            echo 'configured=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'configured=false' >> "$GITHUB_OUTPUT"
+            echo 'No private source token; retain durable sanitized metrics.'
+          fi
+      - uses: actions/checkout@v4
+        if: steps.credential.outputs.configured == 'true'
+        with:
+          ref: dev
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        if: steps.credential.outputs.configured == 'true'
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        if: steps.credential.outputs.configured == 'true'
+        with:
+          node-version: '22'
+      - name: Install locked private collector dependencies
+        if: steps.credential.outputs.configured == 'true'
+        run: |
+          python -m pip install --require-hashes -r requirements.lock
+          python -m pip install --no-deps -e .
+      - name: Collect private repositories into ephemeral state
+        id: scan
+        if: steps.credential.outputs.configured == 'true'
+        env:
+          POLY_TALLY_TOKEN: ${{ secrets.POLY_TALLY_READ_TOKEN }}
+        run: |
+          umask 077
+          if python -m poly_tally collect --private-only --include-private-metrics \
+            --state "$RUNNER_TEMP/private-tally" \
+            --output "$RUNNER_TEMP/private-public-stats.json" \
+            --private-metrics-output "$RUNNER_TEMP/private-metrics.json" \
+            --refresh --allow-partial > "$RUNNER_TEMP/private-collect.log" 2>&1 \
+            && node scripts/metrics.mjs validate "$RUNNER_TEMP/private-metrics.json" --complete; then
+            echo 'available=true' >> "$GITHUB_OUTPUT"
+            echo 'status=available' >> "$GITHUB_OUTPUT"
+          else
+            echo 'available=false' >> "$GITHUB_OUTPUT"
+            echo 'status=stale' >> "$GITHUB_OUTPUT"
+            echo '::warning::Private collection incomplete; retain the previous sanitized snapshot.'
+          fi
+      # 私有 Git 对象、SQLite、检查点和诊断日志不能进入 cache 或 artifact。
+      - name: Stage only the sanitized private snapshot
+        if: steps.scan.outputs.available == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: private-candidate
+          path: ${{ runner.temp }}/private-metrics.json
+          retention-days: 1
+          if-no-files-found: error
+      - name: Remove ephemeral private computation state
+        if: always() && steps.credential.outputs.configured == 'true'
+        run: rm -rf "$RUNNER_TEMP/private-tally" "$RUNNER_TEMP/private-public-stats.json" "$RUNNER_TEMP/private-collect.log" "$RUNNER_TEMP/private-metrics.json"
+
   collect:
+    needs: private
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    outputs:
+      private_available: ${{ steps.private-state.outputs.available }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -39,17 +112,25 @@ jobs:
       - name: Verify collector and dashboard
         run: |
           python -m pytest -q
-          node --test web/*.test.mjs
-      - name: Restore optional object and parser caches
+          node --test scripts/*.test.mjs web/*.test.mjs
+      - name: Restore optional public object and parser caches
         uses: actions/cache@v4
         with:
           path: .poly-tally
           key: tally-v1-${{ runner.os }}-${{ github.run_id }}
           restore-keys: tally-v1-${{ runner.os }}-
-      - name: Restore durable public checkpoint
+      - name: Restore durable public checkpoint and sanitized private baseline
         env:
           GH_TOKEN: ${{ github.token }}
-        run: node scripts/state.mjs restore .poly-tally/remote-checkpoint.json
+        run: node scripts/state.mjs restore .poly-tally/remote-checkpoint.json web/data/private-metrics.json
+      - name: Download optional sanitized private candidate
+        id: candidate
+        if: needs.private.outputs.available == 'true'
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: private-candidate
+          path: ${{ runner.temp }}/private-candidate
       - name: Collect public repositories
         env:
           POLY_TALLY_TOKEN: ${{ github.token }}
@@ -60,12 +141,46 @@ jobs:
             cp .poly-tally/remote-checkpoint.json .poly-tally/checkpoint.json
           fi
           python -m poly_tally collect --public-only --refresh --allow-partial --checkpoint .poly-tally/checkpoint.json "${restore[@]}"
-          node scripts/build-site.mjs
-      - name: Stage durable checkpoint
+      - name: Adopt a complete private snapshot only when its scope is preserved
+        id: adopt
+        if: needs.private.outputs.available == 'true' && steps.candidate.outcome == 'success'
+        run: |
+          if node scripts/metrics.mjs adopt web/data/private-metrics.json "$RUNNER_TEMP/private-candidate/private-metrics.json" web/data/stats.json; then
+            echo 'status=available' >> "$GITHUB_OUTPUT"
+          else
+            echo 'status=stale' >> "$GITHUB_OUTPUT"
+            echo '::warning::Private snapshot rejected; retain the previous sanitized snapshot.'
+          fi
+      - name: Build dashboard with the retained or fresh sanitized snapshot
+        env:
+          PRIVATE_JOB_RESULT: ${{ needs.private.result }}
+          PRIVATE_SCAN_STATUS: ${{ needs.private.outputs.status }}
+          PRIVATE_CANDIDATE_AVAILABLE: ${{ needs.private.outputs.available }}
+          PRIVATE_DOWNLOAD_OUTCOME: ${{ steps.candidate.outcome }}
+          PRIVATE_ADOPT_STATUS: ${{ steps.adopt.outputs.status }}
+        run: POLY_TALLY_PRIVATE_STATUS="$(node scripts/metrics.mjs status)" node scripts/build-site.mjs
+      - name: Detect sanitized state for durable publication
+        id: private-state
+        run: |
+          if [ -f web/data/private-metrics.json ]; then
+            node scripts/metrics.mjs validate web/data/private-metrics.json --complete
+            echo 'available=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'available=false' >> "$GITHUB_OUTPUT"
+          fi
+      - name: Stage durable public checkpoint
         uses: actions/upload-artifact@v4
         with:
           name: public-checkpoint
           path: .poly-tally/checkpoint.json
+          retention-days: 90
+          if-no-files-found: error
+      - name: Stage durable sanitized private metrics
+        if: steps.private-state.outputs.available == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: private-metrics
+          path: web/data/private-metrics.json
           retention-days: 90
           if-no-files-found: error
       - uses: actions/upload-pages-artifact@v4
@@ -74,6 +189,7 @@ jobs:
 
   persist:
     needs: collect
+    if: ${{ !cancelled() && needs.collect.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -89,13 +205,25 @@ jobs:
         with:
           name: public-checkpoint
           path: checkpoint
-      - name: Save durable public state when inventory changes
+      - name: Download sanitized private state when available
+        if: needs.collect.outputs.private_available == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: private-metrics
+          path: checkpoint
+      - name: Save durable state when inventory or sanitized metrics change
         env:
           GH_TOKEN: ${{ github.token }}
-        run: node scripts/state.mjs save checkpoint/checkpoint.json
+        run: |
+          private=()
+          if [ -f checkpoint/private-metrics.json ]; then
+            private=(checkpoint/private-metrics.json)
+          fi
+          node scripts/state.mjs save checkpoint/checkpoint.json "${private[@]}"
 
   deploy:
     needs: [collect, persist]
+    if: ${{ !cancelled() && needs.collect.result == 'success' && needs.persist.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       pages: write
