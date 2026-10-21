@@ -15,7 +15,7 @@ export function svgElement(tag, attributes = {}, text) {
   if (text !== undefined) node.textContent = text;
   return node;
 }
-const colors = ['#638bd0', '#df9d72', '#71b4a1', '#b294cc', '#d87f91', '#91a9c1', '#c1ae63', '#6da8bf', '#a6b580', '#bc8d75', '#8493cc', '#cd9eb4', '#75a994', '#bdaf95', '#96a5b8', '#c7a4db'];
+const colors = ['#438e7c', '#d0ac72', '#839bb4', '#a19db4', '#bd8b80', '#9eaf8b', '#b8b079', '#6c9ca5', '#acbb9d', '#b49781', '#8a99af', '#c1a1aa', '#75a994', '#b9b09a', '#97a6a2', '#ac9bb8'];
 export const repositoryColors = repositories => new Map([...repositories].sort((a, b) => a.id.localeCompare(b.id)).map((repository, index) => [repository.id, index < colors.length ? colors[index] : `hsl(${((index * 137.508) % 360).toFixed(2)} 35% ${index % 2 ? 60 : 68}%)`]));
 export function colorDot(color) {
   const dot = element('i', 'color-dot'); dot.style.backgroundColor = color; return dot;

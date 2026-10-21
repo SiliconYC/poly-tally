@@ -1,6 +1,6 @@
 import {element, svgElement, colorDot, format, compact} from './chart-utils.mjs';
 
-const knownColors = {Python: '#5c8dd3', JavaScript: '#d9ae57', TypeScript: '#8179c8', TSX: '#9684c7', Rust: '#ce8c68', Go: '#60acb6', Markdown: '#94a8be', HTML: '#d58591', CSS: '#b09acb', JSON: '#6cab9c', QML: '#a0b56f'};
+const knownColors = {Python: '#438e7c', JavaScript: '#d9ae57', TypeScript: '#8179c8', TSX: '#9684c7', Rust: '#ce8c68', Go: '#60acb6', Markdown: '#94a8be', HTML: '#d58591', CSS: '#b09acb', JSON: '#c8ad79', QML: '#a0b56f'};
 function languageColor(name) {
   let hash = 0;
   for (const character of name) hash = (hash * 31 + character.charCodeAt(0)) >>> 0;

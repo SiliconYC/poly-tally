@@ -59,7 +59,7 @@ export function renderMonthlyChanges({container, details, months, label, onSelec
   };
   months.forEach((month, index) => {
     const x = left + stride * (index + .5);
-    const bar = svgElement('rect', {x: x - barWidth / 2, y: month.change === null ? zero - 2 : Math.min(zero, y(month.change)), width:barWidth, height:month.change === null || month.change === 0 ? 3 : Math.abs(y(month.change) - zero), rx:2, fill:month.change === null ? '#cbd5e1' : month.change < 0 ? '#d38790' : '#7b9ed5', tabindex:0, role:'button', class:'monthly-bar', 'aria-label': `${month.month}，${month.change === null ? '暂无可比数据' : `${month.change} ${label}`}，${month.compared} 个可比仓库，${month.missing} 个缺少期初。点击缩放趋势图。`});
+    const bar = svgElement('rect', {x: x - barWidth / 2, y: month.change === null ? zero - 2 : Math.min(zero, y(month.change)), width:barWidth, height:month.change === null || month.change === 0 ? 3 : Math.abs(y(month.change) - zero), rx:2, fill:month.change === null ? '#cbd3c6' : month.change < 0 ? '#c58b81' : '#66a08c', tabindex:0, role:'button', class:'monthly-bar', 'aria-label': `${month.month}，${month.change === null ? '暂无可比数据' : `${month.change} ${label}`}，${month.compared} 个可比仓库，${month.missing} 个缺少期初。点击缩放趋势图。`});
     bar.addEventListener('pointerenter', () => show(month)); bar.addEventListener('focus', () => show(month));
     bar.addEventListener('click', () => onSelect(month));
     bar.addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onSelect(month); } });
