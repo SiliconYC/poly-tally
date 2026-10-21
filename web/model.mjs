@@ -15,6 +15,25 @@ const snapshotMetrics = (snapshot, language) => language === 'all' ? snapshot?.m
 export const repositoryVisibility = repository => repository.visibility ?? 'public';
 export const repositoryDisplayName = repository => repository.name.includes('/') ? repository.name.slice(repository.name.indexOf('/') + 1) : repository.name;
 
+// Scan/export times are not repository updates. Sanitized private exports may
+// supply only the UTC commit date; old daily-only exports retain day precision.
+export function repositoryUpdatedAt(repository) {
+  if (Number.isFinite(instant(repository.lastCommitDate))) return repository.lastCommitDate;
+  const commits = repository.history.map(snapshot => snapshot.committedAt).filter(value => Number.isFinite(instant(value)));
+  const candidates = commits.length ? commits : repository.history.map(snapshot => snapshot.timestamp).filter(value => Number.isFinite(instant(value)));
+  return candidates.reduce((latest, value) => latest === null || instant(value) > instant(latest) ? value : latest, null);
+}
+
+// Each repository is already a unique statistical item. In particular, lineage
+// groups arrive folded by the collector; never expand or sum their members here.
+export function repositoryShares(repositories, {metric = 'code', language = 'all'} = {}) {
+  const rows = repositories.map(repository => ({id: repository.id, name: repositoryDisplayName(repository), value: metricValue(snapshotMetrics(sortedHistory(repository).at(-1), language), metric)}))
+    .filter(row => row.value > 0).sort((a, b) => b.value - a.value || a.id.localeCompare(b.id));
+  const total = rows.reduce((sum, row) => sum + row.value, 0);
+  return rows.map(row => ({...row, share: row.value / total, percentage: row.value / total * 100}));
+}
+
+
 export function publicationSummary(data) {
   const privateRepositories = data.repositories.filter(repository => repositoryVisibility(repository) === 'private').length;
   const publication = data.publication ?? {};
@@ -127,7 +146,7 @@ export function sortRepositories(repositories, { key = 'name', direction = 'asc'
   const value = repository => {
     if (key === 'metric') return repository.history.length ? latestTotals([repository], language)[metric] : null;
     if (key === 'total' || METRICS.includes(key)) return repository.history.length ? latestTotals([repository], language)[key] : null;
-    if (key === 'updated') return Number.isFinite(instant(repository.lastSuccessAt)) ? instant(repository.lastSuccessAt) : null;
+    if (key === 'updated') return Number.isFinite(instant(repositoryUpdatedAt(repository))) ? instant(repositoryUpdatedAt(repository)) : null;
     if (key === 'status') return STATUS_LABELS[repository.status] ?? repository.status;
     if (key === 'rules') return repository.rulesVersion || null;
     return repository.name;

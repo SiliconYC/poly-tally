@@ -1,8 +1,10 @@
-import {monthlyChanges, repositoryCsv, renderMonthlyChanges} from './insights.mjs';
+import {periodChanges, repositoryCsv} from './insights.mjs';
+import {renderPeriodChanges} from './change-chart.mjs';
+import {copyRepositoryName, createToast, repositoryActions} from './interactions.mjs';
 import {renderLanguageChart} from './language-chart.mjs';
 import {renderStackedChart} from './stacked-chart.mjs';
 import {repositoryColors} from './chart-utils.mjs';
-import { METRIC_LABELS, selectRepositories, latestTotals, languageTotals, loadStats, publicationSummary, repositoryVisibility, repositoryDisplayName, repositoryOptions, stockChange } from './model.mjs';
+import { METRIC_LABELS, selectRepositories, latestTotals, languageTotals, loadStats, publicationSummary, repositoryVisibility, repositoryDisplayName, repositoryOptions, repositoryShares, stockChange } from './model.mjs';
 
 const $ = id => document.getElementById(id);
 const format = number => new Intl.NumberFormat('zh-CN').format(number);
@@ -11,7 +13,7 @@ const formatDate = value => Number.isFinite(Date.parse(value)) ? dateFormat.form
 let data;
 let colors;
 const chartView = {hidden: new Set(), range: null, percent: false};
-const state = { mode: 'current', ids: [], scope: 'all', language: 'all', metric: 'code', period: 'all', includeStale: false, tableSort: 'total', tableDirection: 'desc', tableQuery: '', pickerSort: 'name-asc', query: '', languageSort: 'value-desc' };
+const state = { mode: 'current', ids: [], scope: 'all', language: 'all', metric: 'code', period: 'all', includeStale: false, tableSort: 'total', tableDirection: 'desc', tableQuery: '', pickerSort: 'name-asc', query: '', languageSort: 'value-desc', changeMetric: 'code', changePeriod: 'month', composition: 'language' };
 
 function element(tag, className, text) {
   const node = document.createElement(tag);
@@ -19,21 +21,8 @@ function element(tag, className, text) {
   if (text !== undefined) node.textContent = text;
   return node;
 }
-function repositoryLink(repository) {
-  const name = element('span', 'repo-name', repositoryDisplayName(repository));
-  if (repositoryVisibility(repository) === 'private') return name;
-  try {
-    const url = new URL(repository.url);
-    if (url.protocol === 'https:' && url.hostname === 'github.com') {
-      const link = element('a', 'repo-name', repositoryDisplayName(repository));
-      link.href = url.href;
-      link.target = '_blank';
-      link.rel = 'noopener noreferrer';
-      return link;
-    }
-  } catch {}
-  return name;
-}
+const notify = createToast($('copy-toast'));
+const copyName = repository => copyRepositoryName(repository, {notify});
 function setLoading() {
   $('dashboard').hidden = true;
   $('load-state').hidden = false;
@@ -123,8 +112,10 @@ function render() {
   $('active-filters').hidden = !filtered.length;
   $('active-filters').textContent = filtered.join(' · ');
   const messages = [];
+  const incompleteRebuild = Boolean(data.lineageVersion) && data.completeness?.complete !== true;
+  if (incompleteRebuild) messages.push('全量重算未完成 · 当前总量尚不完整，待完整采集后更新。');
   if (data.publication?.privateStatus === 'retained') messages.push(`私有快照待重算 · ${formatDate(data.publication.privateUpdatedAt)} UTC；未归档私有仓库已计入旧快照。`);
-  if (data.publication?.privateStatus === 'pending-rebuild') messages.push('当前仅含公开仓库；私有仓库等待重新采集，旧数据未计入。');
+  if (data.publication?.privateStatus === 'pending-rebuild' && !incompleteRebuild) messages.push('当前仅含公开仓库；私有仓库等待重新采集，旧数据未计入。');
   if (!data.repositories.length) messages.push('尚无可发布的仓库数据。首次成功采集后，这里会自动呈现默认分支历史。');
   const mismatched = scoped.filter(repository => state.ids.includes(repository.id) && repository.rulesVersion !== data.rules.version && repository.dataFreshness !== 'retained-private' && repository.history.length);
   if (mismatched.length) messages.push(`${mismatched.length} 个仓库保留旧规则快照，已隔离出汇总。`);
@@ -144,9 +135,8 @@ function render() {
   const until = data.generatedAt;
   const since = state.period === 'all' ? undefined : new Date(Date.parse(until) - Number(state.period) * 86400000).toISOString();
   renderStackedChart({container: $('chart'), navigator: $('chart-navigator'), legend: $('chart-legend'), details: $('chart-details'), rangeLabel: $('chart-range'), repositories: selected, colors, metric: state.metric, label: METRIC_LABELS[state.metric], language: state.language, since, until, view: chartView});
-  $('monthly-title').textContent = `月度${METRIC_LABELS[state.metric]}净变化`;
-  renderMonthlyChanges({container: $('monthly-chart'), details: $('monthly-details'), months: monthlyChanges(selected, {since, until, metric:state.metric, language:state.language}), label: METRIC_LABELS[state.metric], onSelect: month => {
-    chartView.range = [Date.parse(month.since), Date.parse(month.until)]; render(); $('timeline-title').scrollIntoView({block: 'start', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth'});
+  renderPeriodChanges({container: $('monthly-chart'), details: $('monthly-details'), periods: periodChanges(selected, {since, until, period:state.changePeriod, metric:state.changeMetric, language:state.language, limit:state.changePeriod === 'day' ? 30 : 12}), label: METRIC_LABELS[state.changeMetric], onSelect: period => {
+    chartView.range = [Date.parse(period.since), Date.parse(period.until)]; render(); $('timeline-title').scrollIntoView({block: 'start', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth'});
   }});
   renderLanguages(selected);
   renderTable();
@@ -162,13 +152,20 @@ function render() {
 }
 function renderLanguages(repositories) {
   const [key, direction] = state.languageSort.split('-');
-  const languages = languageTotals(repositories, state.metric, { key, direction }).filter(language => state.language === 'all' || language.name === state.language);
-  const total = languages.reduce((sum, language) => sum + language.value, 0);
+  const byRepository = state.composition === 'repository';
+  const items = byRepository
+    ? repositoryShares(repositories, {metric:state.metric, language:state.language}).map(item => ({...item, fullName:repositories.find(repository => repository.id === item.id)?.name ?? item.name})).sort((a, b) => (key === 'name' ? a.name.localeCompare(b.name) : a.value - b.value) * (direction === 'desc' ? -1 : 1) || a.id.localeCompare(b.id))
+    : languageTotals(repositories, state.metric, {key, direction}).filter(item => state.language === 'all' || item.name === state.language);
+  const total = items.reduce((sum, item) => sum + item.value, 0);
+  $('languages-title').textContent = byRepository ? '仓库构成' : '语言构成';
+  $('composition-language').setAttribute('aria-pressed', String(!byRepository));
+  $('composition-repository').setAttribute('aria-pressed', String(byRepository));
   $('language-total').textContent = format(total);
   $('language-unit').textContent = `${METRIC_LABELS[state.metric]} · 最新快照`;
   $('language-reset').hidden = state.language === 'all';
-  renderLanguageChart({container: $('language-chart'), list: $('language-list'), languages, label: METRIC_LABELS[state.metric], onSelect: name => {
-    state.language = name; $('language').value = name; render();
+  renderLanguageChart({container: $('language-chart'), list: $('language-list'), languages:items, label:METRIC_LABELS[state.metric], dimension:state.composition, colors:byRepository ? colors : undefined, onSelect:(name, item) => {
+    if (byRepository) { const repository = repositories.find(repository => repository.id === item.id); if (repository) copyName(repository); }
+    else { state.language = name; $('language').value = name; render(); }
   }});
 }
 function tableRepositories() {
@@ -194,7 +191,8 @@ function renderTable() {
   for (const repository of repositories) {
     const isPrivate = repositoryVisibility(repository) === 'private';
     const row = element('tr');
-    const name = element('td'); name.append(repositoryLink(repository), element('span', 'repo-secondary', isPrivate ? (repository.dataFreshness === 'retained-private' ? '私有 · 旧快照待重算' : '私有 · 按日规模') : `公开 · ⑂ ${repository.branch || '尚无默认分支'}`));
+    const context = isPrivate ? (repository.dataFreshness === 'retained-private' ? '私有 · 旧快照待重算' : repository.lineage ? '私有 · 同源组' : '私有 · 按日规模') : repository.lineage ? '公开 · 同源组' : `公开 · ⑂ ${repository.branch || '尚无默认分支'}`;
+    const name = element('td'); name.append(repositoryActions(repository, {onCopy:copyName}), element('span', 'repo-secondary', context));
     const totals = latestTotals([repository], state.language);
     row.append(name);
     for (const metric of ['total', 'code', 'comment', 'documentation', 'blank', 'files']) {
@@ -207,8 +205,9 @@ function renderRun() {
   const runs = [...(data.runs ?? [])].sort((a, b) => Date.parse(b.finishedAt) - Date.parse(a.finishedAt));
   const run = runs[0];
   if (!run) { $('run-summary').replaceChildren(element('p', '', '暂无运行记录')); return; }
-  $('run-status').textContent = run.failed ? `${format(run.failed)} 个失败` : '采集完成';
-  $('run-status').classList.toggle('warning-status', Boolean(run.failed));
+  const incomplete = run.completeness?.complete === false;
+  $('run-status').textContent = run.failed ? `${format(run.failed)} 个失败` : incomplete ? '采集未完整' : '采集完成';
+  $('run-status').classList.toggle('warning-status', Boolean(run.failed) || incomplete);
   const fields = [[format(run.repositories ?? 0), '公开仓库'], [`${Number(run.durationSeconds ?? 0).toFixed(1)}s`, '运行耗时'], [format(run.cacheHits ?? 0), '缓存命中'], [format(run.parsedBlobs ?? 0), '解析文件对象'], [format(run.objectReads ?? 0), '对象读取'], [format(run.recomputedCommits ?? 0), '重算提交']];
   $('run-summary').replaceChildren();
   for (const [value, name] of fields) { const item = element('div'); item.append(element('strong', '', value), element('span', '', name)); $('run-summary').append(item); }
@@ -225,7 +224,7 @@ for (const [id, checked] of [['select-all', true], ['select-none', false]]) $(id
 $('reset-filters').addEventListener('click', () => {
   chartView.hidden.clear(); chartView.range = null; chartView.percent = false;
   $('chart-absolute').setAttribute('aria-pressed', 'true'); $('chart-percent').setAttribute('aria-pressed', 'false');
-  state.ids = data.repositories.map(repository => repository.id); state.scope = 'all'; state.language = 'all'; state.metric = 'code'; state.period = 'all'; state.includeStale = false; state.mode = 'current'; state.query = ''; state.pickerSort = 'name-asc'; state.tableSort = 'total'; state.tableDirection = 'desc'; state.tableQuery = ''; $('table-search').value = ''; state.languageSort = 'value-desc';
+  state.ids = data.repositories.map(repository => repository.id); state.scope = 'all'; state.language = 'all'; state.metric = 'code'; state.period = 'all'; state.includeStale = false; state.mode = 'current'; state.query = ''; state.pickerSort = 'name-asc'; state.tableSort = 'total'; state.tableDirection = 'desc'; state.tableQuery = ''; $('table-search').value = ''; state.languageSort = 'value-desc'; state.changeMetric = 'code'; state.changePeriod = 'month'; state.composition = 'language'; $('change-metric').value = 'code'; $('change-period').value = 'month';
   $('repository-search').value = ''; $('repository-sort').value = 'name-asc'; $('language-sort').value = 'value-desc';
   for (const id of ['scope', 'language', 'metric', 'period']) $(id).value = state[id];
   $('include-stale').checked = false;
@@ -235,6 +234,8 @@ $('reset-filters').addEventListener('click', () => {
 $('repository-search').addEventListener('input', event => { state.query = event.target.value; renderRepositoryOptions(); });
 $('repository-sort').addEventListener('change', event => { state.pickerSort = event.target.value; renderRepositoryOptions(); });
 $('language-reset').addEventListener('click', () => { state.language = 'all'; $('language').value = 'all'; render(); });
+for (const [id, key] of [['change-metric', 'changeMetric'], ['change-period', 'changePeriod']]) $(id).addEventListener('change', event => { state[key] = event.target.value; render(); });
+for (const composition of ['language', 'repository']) $(`composition-${composition}`).addEventListener('click', () => { state.composition = composition; renderLanguages(selectRepositories(data, state)); });
 $('language-sort').addEventListener('change', event => { state.languageSort = event.target.value; renderLanguages(selectRepositories(data, state)); });
 for (const button of document.querySelectorAll('[data-sort]')) button.addEventListener('click', () => {
   state.tableDirection = state.tableSort === button.dataset.sort ? state.tableDirection === 'asc' ? 'desc' : 'asc' : button.dataset.sort !== 'name' ? 'desc' : 'asc';
