@@ -7,12 +7,13 @@ import {mergePrivateMetrics, validatePrivateMetrics, validateRetainedPrivateBase
 // A release-wide content digest keeps the HTML, CSS and complete ESM graph together.
 // Hash filenames (rather than reload instructions) invalidate browser/CDN asset caches.
 async function versionAssets(site) {
-  const assets = [];
+  const assets = [], htmlPages = [];
   async function visit(directory) {
     for (const entry of await readdir(directory, {withFileTypes: true})) {
       const path = resolve(directory, entry.name);
       if (entry.isDirectory()) { if (entry.name !== 'data') await visit(path); }
       else if (/\.(?:mjs|js|css)$/.test(entry.name)) assets.push(path);
+      else if (entry.name.endsWith('.html')) htmlPages.push(path);
     }
   }
   await visit(site);
@@ -42,8 +43,7 @@ async function versionAssets(site) {
     await writeFile(names.get(path), rewrite(source, path));
     await rm(path);
   }
-  const index = resolve(site, 'index.html');
-  await writeFile(index, rewrite(await readFile(index, 'utf8'), index));
+  for (const page of htmlPages) await writeFile(page, rewrite(await readFile(page, 'utf8'), page));
 }
 
 export async function buildSite({root = resolve(import.meta.dirname, '..'), privateStatus = process.env.POLY_TALLY_PRIVATE_STATUS, logger = console} = {}) {

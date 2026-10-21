@@ -1,0 +1,291 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-10-21T12:00:00Z",
+  "rules": {
+    "version": "synthetic-ui-qa",
+    "description": "合成夹具，仅验证界面，不是真实采集结果。"
+  },
+  "collector": {
+    "version": "synthetic-ui-qa"
+  },
+  "runs": [],
+  "repositories": [
+    {
+      "id": "lineage:vitro",
+      "name": "Synthetic/vitro_union_lab",
+      "history": [
+        {
+          "timestamp": "2026-08-31T12:00:00Z",
+          "metrics": {
+            "code": 100,
+            "comment": 20,
+            "documentation": 50,
+            "files": 12,
+            "blank": 10
+          },
+          "languages": {
+            "Python": {
+              "code": 100,
+              "comment": 20,
+              "documentation": 0,
+              "files": 11,
+              "blank": 10
+            },
+            "Markdown": {
+              "code": 0,
+              "comment": 0,
+              "documentation": 50,
+              "files": 1,
+              "blank": 0
+            }
+          }
+        },
+        {
+          "timestamp": "2026-09-15T12:00:00Z",
+          "metrics": {
+            "code": 180,
+            "comment": 25,
+            "documentation": 70,
+            "files": 18,
+            "blank": 18
+          },
+          "languages": {
+            "Python": {
+              "code": 180,
+              "comment": 25,
+              "documentation": 0,
+              "files": 17,
+              "blank": 18
+            },
+            "Markdown": {
+              "code": 0,
+              "comment": 0,
+              "documentation": 70,
+              "files": 1,
+              "blank": 0
+            }
+          }
+        },
+        {
+          "timestamp": "2026-10-01T12:00:00Z",
+          "metrics": {
+            "code": 160,
+            "comment": 24,
+            "documentation": 65,
+            "files": 16,
+            "blank": 16
+          },
+          "languages": {
+            "Python": {
+              "code": 160,
+              "comment": 24,
+              "documentation": 0,
+              "files": 15,
+              "blank": 16
+            },
+            "Markdown": {
+              "code": 0,
+              "comment": 0,
+              "documentation": 65,
+              "files": 1,
+              "blank": 0
+            }
+          }
+        },
+        {
+          "timestamp": "2026-10-12T12:00:00Z",
+          "metrics": {
+            "code": 210,
+            "comment": 35,
+            "documentation": 90,
+            "files": 22,
+            "blank": 21
+          },
+          "languages": {
+            "Python": {
+              "code": 210,
+              "comment": 35,
+              "documentation": 0,
+              "files": 21,
+              "blank": 21
+            },
+            "Markdown": {
+              "code": 0,
+              "comment": 0,
+              "documentation": 90,
+              "files": 1,
+              "blank": 0
+            }
+          }
+        },
+        {
+          "timestamp": "2026-10-20T12:00:00Z",
+          "metrics": {
+            "code": 190,
+            "comment": 30,
+            "documentation": 80,
+            "files": 20,
+            "blank": 19
+          },
+          "languages": {
+            "Python": {
+              "code": 190,
+              "comment": 30,
+              "documentation": 0,
+              "files": 19,
+              "blank": 19
+            },
+            "Markdown": {
+              "code": 0,
+              "comment": 0,
+              "documentation": 80,
+              "files": 1,
+              "blank": 0
+            }
+          }
+        }
+      ],
+      "visibility": "public",
+      "url": null,
+      "branch": "main",
+      "head": null,
+      "status": "active",
+      "rulesVersion": "synthetic-ui-qa",
+      "historyComplete": true,
+      "lastSuccessAt": "2026-10-21T12:00:00Z",
+      "lineage": {
+        "id": "vitro",
+        "version": "synthetic-ui-qa",
+        "members": [
+          {
+            "name": "Synthetic/vitro"
+          },
+          {
+            "name": "Synthetic/vitro_zero_lab"
+          },
+          {
+            "name": "Synthetic/vitro_union_lab"
+          }
+        ],
+        "dominantMember": "Synthetic/vitro_zero_lab",
+        "representativeMember": "Synthetic/vitro_union_lab"
+      }
+    },
+    {
+      "id": "foundry",
+      "name": "Synthetic/vitro_agent_foundry",
+      "history": [
+        {
+          "timestamp": "2026-08-31T12:00:00Z",
+          "metrics": {
+            "code": 20,
+            "comment": 5,
+            "documentation": 200,
+            "files": 10,
+            "blank": 2
+          },
+          "languages": {
+            "Python": {
+              "code": 20,
+              "comment": 5,
+              "documentation": 0,
+              "files": 9,
+              "blank": 2
+            },
+            "Markdown": {
+              "code": 0,
+              "comment": 0,
+              "documentation": 200,
+              "files": 1,
+              "blank": 0
+            }
+          }
+        },
+        {
+          "timestamp": "2026-10-15T12:00:00Z",
+          "metrics": {
+            "code": 30,
+            "comment": 8,
+            "documentation": 240,
+            "files": 12,
+            "blank": 3
+          },
+          "languages": {
+            "Python": {
+              "code": 30,
+              "comment": 8,
+              "documentation": 0,
+              "files": 11,
+              "blank": 3
+            },
+            "Markdown": {
+              "code": 0,
+              "comment": 0,
+              "documentation": 240,
+              "files": 1,
+              "blank": 0
+            }
+          }
+        }
+      ],
+      "visibility": "public",
+      "url": "https://github.com/Synthetic/vitro_agent_foundry",
+      "branch": "main",
+      "head": null,
+      "status": "active",
+      "rulesVersion": "synthetic-ui-qa",
+      "historyComplete": true,
+      "lastSuccessAt": "2026-10-21T12:00:00Z"
+    },
+    {
+      "id": "new",
+      "name": "Synthetic/new_repository",
+      "history": [
+        {
+          "timestamp": "2026-10-18T12:00:00Z",
+          "metrics": {
+            "code": 15,
+            "comment": 4,
+            "documentation": 10,
+            "files": 3,
+            "blank": 1
+          },
+          "languages": {
+            "Python": {
+              "code": 15,
+              "comment": 4,
+              "documentation": 0,
+              "files": 2,
+              "blank": 1
+            },
+            "Markdown": {
+              "code": 0,
+              "comment": 0,
+              "documentation": 10,
+              "files": 1,
+              "blank": 0
+            }
+          }
+        }
+      ],
+      "visibility": "public",
+      "url": "https://github.com/Synthetic/new_repository",
+      "branch": "main",
+      "head": null,
+      "status": "active",
+      "rulesVersion": "synthetic-ui-qa",
+      "historyComplete": true,
+      "lastSuccessAt": "2026-10-21T12:00:00Z"
+    }
+  ],
+  "synthetic": true,
+  "lineageVersion": "0123456789abcdef",
+  "completeness": {
+    "complete": true,
+    "discoveryComplete": true,
+    "expectedRepositories": 5,
+    "scannedRepositories": 5,
+    "missingMembers": 0,
+    "failed": 0
+  }
+}

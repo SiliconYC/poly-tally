@@ -150,3 +150,31 @@ test('explicit retained baseline restores default private totals and fresh same-
   assert.equal(laterReset.publication.privateStatus, 'pending-rebuild');
   assert.equal(laterReset.publication.privateRepositories, 0, 'explicit v2 retention cannot silently cross into a later reset');
 });
+
+test('nested preview HTML rewrites its own assets and parent imports while preserving synthetic data', async t => {
+  const root = await fixture(t);
+  await mkdir(join(root, 'web/qa-lineage/data'), {recursive:true});
+  await mkdir(join(root, 'web/qa-lineage/details'));
+  await writeFile(join(root, 'web/styles.css'), 'body{color:black}');
+  await writeFile(join(root, 'web/app.mjs'), 'export const production = true;');
+  const nested = '<link href="./styles.css" rel="stylesheet"><script type="module" src="./app.mjs"></script>';
+  await writeFile(join(root, 'web/qa-lineage/index.html'), nested);
+  await writeFile(join(root, 'web/qa-lineage/details/index.html'), '<script type="module" src="../app.mjs"></script><link href="../../styles.css" rel="stylesheet">');
+  await writeFile(join(root, 'web/qa-lineage/styles.css'), 'body{color:green}');
+  await writeFile(join(root, 'web/qa-lineage/app.mjs'), `import '../app.mjs'; fetch('./data/stats.json');`);
+  const synthetic = {schemaVersion:1,synthetic:true,repositories:[{name:'Synthetic/repository'}]};
+  await writeFile(join(root, 'web/qa-lineage/data/stats.json'), JSON.stringify(synthetic));
+  const {buildSite} = await import('./build-site.mjs');
+  await buildSite({root,logger:{log(){}}});
+  const html = await readFile(join(root,'site/qa-lineage/index.html'),'utf8');
+  const version = html.match(/styles\.([a-f0-9]{16})\.css/)?.[1];
+  assert.ok(version,'nested HTML must reference built versioned styles, never removed source names');
+  assert.ok(html.includes(`./app.${version}.mjs`));
+  assert.match(await readFile(join(root,`site/qa-lineage/app.${version}.mjs`),'utf8'), new RegExp(`\\.\\./app\\.${version}\\.mjs`));
+  const deep = await readFile(join(root,'site/qa-lineage/details/index.html'),'utf8');
+  assert.ok(deep.includes(`../app.${version}.mjs`)); assert.ok(deep.includes(`../../styles.${version}.css`));
+  assert.deepEqual(JSON.parse(await readFile(join(root,'site/qa-lineage/data/stats.json'))),synthetic);
+  assert.deepEqual(JSON.parse(await readFile(join(root,'site/data/stats.json'))),publicStats);
+  assert.equal(await readFile(join(root,'web/qa-lineage/index.html'),'utf8'),nested);
+  assert.equal(await readFile(join(root,'site/index.html'),'utf8'),'<main>Dashboard</main>');
+});
