@@ -29,7 +29,7 @@ export function publicationSummary(data) {
 }
 
 export function selectRepositories(data, { mode = 'current', ids, includeStale = false, scope = 'all' } = {}) {
-  const statuses = new Set(['active', 'archived']);
+  const statuses = new Set(['active']);
   if (mode === 'archive') statuses.add('cold');
   if (includeStale) { statuses.add('stale'); statuses.add('inaccessible'); }
   const selected = ids === undefined ? null : new Set(ids);
@@ -86,6 +86,24 @@ export function stackedHistory(repositories, { language = 'all', metric = 'code'
   return { series, points };
 }
 
+// Rank the same carry-forward steps drawn by the chart, over the entire known
+// history. A snapshot contributes stock × elapsed time, never stock × commits.
+// The shared endpoint keeps sparse histories comparable; view/zoom starts do
+// not belong in this calculation. Unknown time before first observation adds 0.
+export function rankRepositoriesByHistoricalArea(repositories, { language = 'all', metric = 'code', until } = {}) {
+  const histories = repositories.map(repository => ({repository, history: sortedHistory(repository)}));
+  const end = until ? instant(until) : histories.reduce((latest, {history}) => Math.max(latest, history.at(-1)?.time ?? -Infinity), -Infinity);
+  return histories.map(({repository, history}) => {
+    let area = 0;
+    for (let i = 0; i < history.length && history[i].time < end; i++) {
+      const duration = Math.min(end, history[i + 1]?.time ?? end) - history[i].time;
+      area += metricValue(snapshotMetrics(history[i], language), metric) * duration;
+    }
+    return {repository, area};
+  }).sort((a, b) => b.area - a.area || a.repository.id.localeCompare(b.repository.id))
+    .map(({repository}) => repository);
+}
+
 export function aggregateHistory(repositories, options = {}) {
   return stackedHistory(repositories, options).points.map(({timestamp, value}) => ({timestamp, value}));
 }
@@ -124,7 +142,7 @@ export function sortRepositories(repositories, { key = 'name', direction = 'asc'
 
 export function repositoryOptions(repositories, { query = '', ...sorting } = {}) {
   const search = query.trim().toLocaleLowerCase();
-  return sortRepositories(repositories.filter(repository => repository.name.toLocaleLowerCase().includes(search)), sorting);
+  return sortRepositories(repositories.filter(repository => repository.status !== 'archived' && repository.name.toLocaleLowerCase().includes(search)), sorting);
 }
 
 export function stockChange(repositories, { since, until, language = 'all', metric = 'code' } = {}) {

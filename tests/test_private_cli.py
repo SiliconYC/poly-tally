@@ -45,3 +45,30 @@ class Test私有入口_类(unittest.TestCase):
                 采集器.api_采集()
             self.assertEqual([项["id"] for 项 in 采集器.引擎.api_仓库列表()], ["2"])
             self.assertEqual(默认分支.call_count, 1)
+
+    def test_新批次隔离旧状态且拒绝旧检查点(self) -> None:
+        import json
+        from poly_tally.store import 数据库_类
+        from poly_tally.github import GitHub发现器_类
+        with tempfile.TemporaryDirectory() as 目录:
+            根 = Path(目录)
+            旧库 = 数据库_类(根 / "state")
+            旧库.api_保存仓库({"id": "old-baggage"})
+            旧库.api_关闭()
+            参数 = ["poly_tally", "collect", "--public-only", "--dataset-epoch", "reset-test-v2", "--state", str(根 / "state"), "--output", str(根 / "stats.json"), "--checkpoint", str(根 / "checkpoint.json")]
+            with patch("sys.argv", 参数), patch.object(GitHub发现器_类, "api_发现", return_value=[]):
+                self.assertEqual(主入口(), 0)
+            数据 = json.loads((根 / "stats.json").read_text())
+            self.assertEqual(数据["datasetEpoch"], "reset-test-v2")
+            self.assertEqual(数据["repositories"], [])
+            检查点 = json.loads((根 / "checkpoint.json").read_text())
+            self.assertEqual(检查点["datasetEpoch"], "reset-test-v2")
+            self.assertEqual(检查点["collection"]["failed"], 0)
+            检查点.pop("datasetEpoch")
+            (根 / "old.json").write_text(json.dumps(检查点))
+            with patch("sys.argv", 参数 + ["--import-checkpoint", str(根 / "old.json")]):
+                with self.assertRaisesRegex(ValueError, "批次"):
+                    主入口()
+            旧库 = 数据库_类(根 / "state")
+            self.addCleanup(旧库.api_关闭)
+            self.assertEqual(旧库.api_仓库列表(), [{"id": "old-baggage"}])

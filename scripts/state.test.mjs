@@ -41,8 +41,8 @@ async function run(t, command, firstData, secondData, remote = {}, extra = {}) {
   const api = github(remote, extra);
   const logs = [];
   const {runState} = await import('./state.mjs');
-  await runState(command, filename, extra.noPrivate ? undefined : privateFilename, {env: {GITHUB_REPOSITORY: 'owner/project', GH_TOKEN: 'secret-token'}, fetcher: api.fetcher, logger: {log: text => logs.push(text)}});
-  return {filename, privateFilename, logs, ...api};
+  const outcome = await runState(command, filename, extra.noPrivate ? undefined : privateFilename, {env: {GITHUB_REPOSITORY: 'owner/project', GH_TOKEN: 'secret-token', ...extra.env}, fetcher: api.fetcher, logger: {log: text => logs.push(text)}});
+  return {filename, privateFilename, logs, outcome, ...api};
 }
 
 test('restore keeps bundled private fallback when no durable branch or private file exists', async t => {
@@ -121,4 +121,55 @@ test('local and combined durable publication reject a complete scan older than t
   const older = {...envelope, generatedAt: '2026-10-20T04:00:00Z'};
   await assert.rejects(run(t, 'save-private', older, null, {'private-metrics.json': envelope}, {noPrivate: true}), /older/);
   await assert.rejects(run(t, 'save', checkpoint, older, {'private-metrics.json': envelope}), /older/);
+});
+
+
+const epoch = 'reset-test-v2';
+const currentCheckpoint = {...checkpoint, datasetEpoch: epoch, collection: {failed: 0, repositories: 1, recomputedCommits: 2}};
+const currentPrivate = {...envelope, datasetEpoch: epoch, archivedRepositoryKeys: []};
+const epochEnv = {POLY_TALLY_DATASET_EPOCH: epoch};
+
+test('epoch restore never revives old checkpoint or bundled private fallback', async t => {
+  const result = await run(t, 'restore', checkpoint, envelope, {'checkpoint.json': checkpoint, 'private-metrics.json': envelope}, {env: epochEnv});
+  assert.equal(result.outcome.resetRequired, true);
+  assert.equal(result.outcome.privatePending, true);
+  await assert.rejects(readFile(result.filename), {code: 'ENOENT'});
+  await assert.rejects(readFile(result.privateFilename), {code: 'ENOENT'});
+  const absent = await run(t, 'restore', checkpoint, envelope, {}, {env: epochEnv, missing: true});
+  assert.equal(absent.outcome.resetRequired, true);
+  await assert.rejects(readFile(absent.privateFilename), {code: 'ENOENT'});
+});
+
+test('successful public reset enables future incremental restore but private remains pending', async t => {
+  const result = await run(t, 'restore', null, envelope, {'checkpoint.json': currentCheckpoint, 'private-metrics.json': envelope}, {env: epochEnv});
+  assert.equal(result.outcome.resetRequired, false);
+  assert.equal(result.outcome.privatePending, true);
+  assert.deepEqual(JSON.parse(await readFile(result.filename)), currentCheckpoint);
+  await assert.rejects(readFile(result.privateFilename), {code: 'ENOENT'});
+});
+
+test('reset save requires current epoch and a fully successful new public scan before any writes', async t => {
+  await assert.rejects(run(t, 'save', checkpoint, null, {}, {env: epochEnv, noPrivate: true}), /epoch/i);
+  await assert.rejects(run(t, 'save', {...currentCheckpoint, collection: {failed: 1}}, null, {'checkpoint.json': checkpoint}, {env: epochEnv, noPrivate: true}), /complete/i);
+  const result = await run(t, 'save', currentCheckpoint, null, {'checkpoint.json': checkpoint, 'private-metrics.json': envelope}, {env: epochEnv, noPrivate: true});
+  const tree = result.requests.find(request => request.path === '/git/trees' && request.method === 'POST').body;
+  assert.deepEqual(tree.tree.map(entry => entry.path), ['checkpoint.json']);
+  assert.equal(tree.base_tree, 'existing-tree');
+});
+
+test('fresh private epoch can replace legacy scope only alongside a completed current public baseline', async t => {
+  const result = await run(t, 'save-private', currentPrivate, null, {'checkpoint.json': currentCheckpoint, 'private-metrics.json': envelope}, {env: epochEnv, noPrivate: true});
+  assert.equal(result.requests.filter(request => request.path === '/git/commits' && request.method === 'POST').length, 1);
+  await assert.rejects(run(t, 'save-private', currentPrivate, null, {'checkpoint.json': checkpoint, 'private-metrics.json': envelope}, {env: epochEnv, noPrivate: true}), /epoch/i);
+});
+
+test('deploy workflow uses the epoch restore decision to rebuild without partial/old cache state', async () => {
+  const workflow = await readFile(new URL('../.github/workflows/pages.yml', import.meta.url), 'utf8');
+  assert.match(workflow, /POLY_TALLY_DATASET_EPOCH: active-default-branches-2026-10-21-v2/);
+  assert.match(workflow, /id: restore-state/);
+  assert.match(workflow, /RESET_REQUIRED: \$\{\{ steps\.restore-state\.outputs\.reset-required \}\}/);
+  assert.match(workflow, /state="\$RUNNER_TEMP\/public-reset"/);
+  assert.match(workflow, /partial=\(\)/);
+  assert.doesNotMatch(workflow, /--refresh --allow-partial > "\$RUNNER_TEMP\/private-collect.log"/);
+  assert.match(workflow, /tally-\$\{\{ env\.POLY_TALLY_DATASET_EPOCH \}\}/);
 });

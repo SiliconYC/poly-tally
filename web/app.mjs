@@ -37,7 +37,7 @@ function repositoryLink(repository) {
 function setLoading() {
   $('dashboard').hidden = true;
   $('load-state').hidden = false;
-  $('load-state').replaceChildren(element('span', 'loader'), element('h2', '', '正在读取代码历史'), element('p', '', '即将呈现仓库与时间之间的联系。'));
+  $('load-state').replaceChildren(element('span', 'loader'), element('h2', '', '正在加载'));
   $('refresh').disabled = true;
 }
 async function initialize() {
@@ -66,7 +66,7 @@ function renderPublication() {
   const summary = publicationSummary(data);
   $('publication-counts').textContent = `已发布 ${format(summary.publicRepositories)} 个公开仓库 + ${format(summary.privateRepositories)} 个私有仓库`;
   const source = { local: '本地采集', 'github-actions': 'GitHub Actions' }[summary.privateSource];
-  const status = { available: '可用', 'not-configured': '未配置私有采集凭据', stale: '保留旧指标，尚未刷新' }[summary.privateStatus] ?? '采集状态未知';
+  const status = { available: '可用', 'not-configured': '未配置私有采集凭据', stale: '保留旧指标，尚未刷新', 'pending-rebuild': '等待重新采集，旧指标未计入' }[summary.privateStatus] ?? '采集状态未知';
   $('private-updated-at').textContent = `私有指标：${status} · 最后成功 ${summary.privateUpdatedAt ? `${formatDate(summary.privateUpdatedAt)} UTC` : '尚无独立采集时间'}${source ? ` · ${source}` : ''}${summary.privateRepositories ? '' : ' · 尚无已发布私有指标'}`;
 }
 function renderRepositoryOptions() {
@@ -123,6 +123,7 @@ function render() {
   $('active-filters').hidden = !filtered.length;
   $('active-filters').textContent = filtered.join(' · ');
   const messages = [];
+  if (data.publication?.privateStatus === 'pending-rebuild') messages.push('当前仅含公开仓库；私有仓库等待重新采集，旧数据未计入。');
   if (!data.repositories.length) messages.push('尚无可发布的仓库数据。首次成功采集后，这里会自动呈现默认分支历史。');
   const mismatched = scoped.filter(repository => state.ids.includes(repository.id) && repository.rulesVersion !== data.rules.version && repository.history.length);
   if (mismatched.length) messages.push(`${mismatched.length} 个仓库保留旧规则快照，已隔离出汇总。`);
@@ -154,6 +155,8 @@ function render() {
   $('stat-change').textContent = change.change === null ? '暂不可比' : (change.change > 0 ? '+' : '') + format(change.change);
   $('stat-change').className = change.change === null ? 'unavailable' : change.change < 0 ? 'negative' : '';
   $('change-context').textContent = !selected.length ? '先选择可用仓库' : change.missing ? change.missing + ' 个仓库缺少期初快照' : METRIC_LABELS[state.metric] + ' · 对比期初已知存量';
+  $('stat-change').title = $('change-context').textContent;
+  if (change.missing && change.change !== null) $('stat-change').textContent += ' *';
   renderRepositoryOptions();
 }
 function renderLanguages(repositories) {

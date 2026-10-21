@@ -59,12 +59,12 @@ test('same timestamp resolves the final snapshot per repository before emitting 
   assert.deepEqual(aggregateHistory(repositories).map(p => p.value), [17]);
 });
 
-test('current totals exclude cold, old rules and failed states; explicit stale inclusion stays same-rule', () => {
+test('current totals exclude archived, cold, old rules and failed states; explicit stale inclusion stays same-rule', () => {
   const data = dataset(['active', 'archived', 'cold', 'stale', 'inaccessible', 'empty', 'excluded'].map((status, i) => repo(String(i), [snapshot(day(1), 10)], { status })).concat(repo('old', [snapshot(day(1), 900)], { rulesVersion: 'old' })));
-  assert.deepEqual(selectRepositories(data).map(r => r.id), ['0', '1']);
-  assert.deepEqual(selectRepositories(data, { mode: 'archive' }).map(r => r.id), ['0', '1', '2']);
-  assert.deepEqual(selectRepositories(data, { includeStale: true }).map(r => r.id), ['0', '1', '3', '4']);
-  assert.deepEqual(selectRepositories(data, { ids: ['1', '2'] }).map(r => r.id), ['1']);
+  assert.deepEqual(selectRepositories(data).map(r => r.id), ['0']);
+  assert.deepEqual(selectRepositories(data, { mode: 'archive' }).map(r => r.id), ['0', '2']);
+  assert.deepEqual(selectRepositories(data, { includeStale: true }).map(r => r.id), ['0', '3', '4']);
+  assert.deepEqual(selectRepositories(data, { ids: ['1', '2'] }).map(r => r.id), []);
   assert.deepEqual(selectRepositories(data, { ids: [] }), []);
 });
 
@@ -167,4 +167,41 @@ test('stacked history carries each repository forward, preserves unknowns, and r
   assert.deepEqual(model.stackedHistory?.([], {}).points, []);
   assert.deepEqual(model.stackedHistory?.(repositories, {since: day(5), until: day(4)}).points, []);
   assert.deepEqual(model.stackedHistory?.(repositories, {until: '2026-09-01T00:00:00Z'}).points, []);
+});
+
+test('historical area ranks duration-weighted step stock, not snapshot count or latest size', () => {
+  const repositories = [
+    repo('new-burst', [snapshot(day(10), 500)]),
+    repo('long-lived', [snapshot(day(1), 100), snapshot(day(10), 1)]),
+    repo('frequent', [snapshot(day(1), 10), snapshot(day(2), 10), snapshot(day(3), 10), snapshot(day(4), 10)]),
+  ];
+  assert.deepEqual(model.rankRepositoriesByHistoricalArea?.(repositories, {until: day(11)}).map(r => r.id), ['long-lived', 'new-burst', 'frequent']);
+  assert.deepEqual(repositories.map(r => r.id), ['new-burst', 'long-lived', 'frequent'], 'sorting must not mutate the source');
+});
+
+test('historical area uses the final simultaneous snapshot and a common carry-forward endpoint', () => {
+  const repositories = [
+    repo('b', [snapshot(day(1), 999), snapshot(day(1), 10)]),
+    repo('a', [snapshot(day(3), 30)]),
+    repo('endpoint', [snapshot(day(4), 0)]),
+  ];
+  assert.deepEqual(model.rankRepositoriesByHistoricalArea?.(repositories).map(r => r.id), ['a', 'b', 'endpoint'], 'equal 30-day-unit areas break ties deterministically by identity');
+  assert.deepEqual(model.rankRepositoriesByHistoricalArea?.([...repositories].reverse()).map(r => r.id), ['a', 'b', 'endpoint']);
+});
+
+test('historical area integrates selected metrics and languages, ignores future snapshots, and preserves empty input', () => {
+  const repositories = [repo('python', [snapshot(day(1), 20, 'Python', 1), snapshot(day(20), 900)]), repo('rust', [snapshot(day(1), 5, 'Rust', 8)])];
+  assert.deepEqual(model.rankRepositoriesByHistoricalArea?.(repositories, {until: day(3), metric: 'documentation'}).map(r => r.id), ['rust', 'python']);
+  assert.deepEqual(model.rankRepositoriesByHistoricalArea?.(repositories, {until: day(3), metric: 'documentation', language: 'Python'}).map(r => r.id), ['python', 'rust']);
+  assert.deepEqual(model.rankRepositoriesByHistoricalArea?.([], {}), []);
+});
+
+
+test('archived repositories cannot re-enter through legacy picker, search, archive mode or stale opt-in', () => {
+  const archived = repo('archived-repo', [snapshot(day(1), 999)], {status: 'archived'});
+  const active = repo('active-repo', [snapshot(day(1), 10)]);
+  const repositories = [archived, active];
+  assert.deepEqual(model.repositoryOptions(repositories).map(r => r.id), ['active-repo']);
+  assert.deepEqual(model.repositoryOptions(repositories, {query: 'archived'}), []);
+  assert.deepEqual(selectRepositories(dataset(repositories), {mode: 'archive', includeStale: true, ids: ['archived-repo']}), []);
 });

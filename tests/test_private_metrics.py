@@ -110,3 +110,12 @@ class Test私有发布_类(unittest.TestCase):
         self.assertEqual(数据["generatedAt"], "2024-02-01T10:00:00Z")
         再导出 = 私有规模导出_类(self.库, self.规则).api_构建()
         self.assertEqual(数据["generatedAt"], 再导出["generatedAt"])
+
+    def test_已归档私有仓库仅留下脱敏排除证据而无名称历史和计数(self) -> None:
+        self.私有["status"] = "archived"
+        self.库.api_保存仓库(self.私有)
+        数据 = 私有规模导出_类(self.库, self.规则).api_构建(self.现在)
+        self.assertEqual(数据["repositories"], [])
+        self.assertEqual(数据["collection"], {"repositories": 0, "failed": 0})
+        self.assertEqual(数据["archivedRepositoryKeys"], [私有规模导出_类.api_匿名键(self.私有["id"])])
+        self.assertNotIn(self.私有["name"], json.dumps(数据))

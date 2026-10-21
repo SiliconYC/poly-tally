@@ -1,10 +1,12 @@
-import {stackedHistory} from './model.mjs';
+import {stackedHistory, rankRepositoriesByHistoricalArea} from './model.mjs';
 import {element, svgElement, colorDot, format, compact, maximumStock, dayLabel, dateLabel} from './chart-utils.mjs';
 
 export function renderStackedChart({container, navigator, legend, details, rangeLabel, repositories, colors, metric, label, language, since, until, view, onRangeChange}) {
   const restoreLegendFocus = legend.contains(document.activeElement);
   const focusedRepository = restoreLegendFocus ? document.activeElement.dataset.repositoryId : null;
-  const visible = repositories.filter(repository => !view.hidden.has(repository.id));
+  // Rank once across all known time, before either zoom or legend visibility.
+  const ordered = rankRepositoriesByHistoricalArea(repositories, {metric, language, until});
+  const visible = ordered.filter(repository => !view.hidden.has(repository.id));
   const full = stackedHistory(visible, {metric, language, since, until});
   const first = full.points[0]?.timestamp, last = full.points.at(-1)?.timestamp;
   const start = first && view.range ? Math.max(Date.parse(first), view.range[0]) : Date.parse(first);
@@ -14,7 +16,7 @@ export function renderStackedChart({container, navigator, legend, details, range
   const rerender = () => renderStackedChart({container, navigator, legend, details, rangeLabel, repositories, colors, metric, label, language, since, until, view, onRangeChange});
   container.replaceChildren(); legend.replaceChildren(); details.replaceChildren(); navigator.replaceChildren();
   rangeLabel.textContent = points.length ? `${dayLabel(points[0].timestamp)} — ${dayLabel(points.at(-1).timestamp)} · UTC` : 'UTC';
-  for (const repository of repositories) {
+  for (const repository of ordered) {
     const button = element('button', 'series-toggle', repository.name.includes('/') ? repository.name.split('/').slice(1).join('/') : repository.name);
     button.dataset.repositoryId = repository.id;
     button.prepend(colorDot(colors.get(repository.id)));
@@ -65,8 +67,6 @@ export function renderStackedChart({container, navigator, legend, details, range
     }
     const path = svgElement('path', {d: `${d}Z`, fill: colors.get(seriesItem.id), 'fill-opacity': .82, stroke: colors.get(seriesItem.id), 'stroke-width': .7, class: 'stack-layer', 'data-series': seriesItem.id});
     svg.append(path); paths.push(path);
-    path.addEventListener('pointerenter', () => paths.forEach(p => p.style.opacity = p === path ? '1' : '.4'));
-    path.addEventListener('pointerleave', () => paths.forEach(p => p.style.opacity = '1'));
   }
   const ticks = max === min ? 1 : width < 480 ? 3 : 6;
   for (let i = 0; i < ticks; i++) {
@@ -78,11 +78,26 @@ export function renderStackedChart({container, navigator, legend, details, range
   svg.append(cursor);
   const tooltip = element('div', 'chart-tooltip stack-tooltip'); tooltip.hidden = true;
   container.append(svg, tooltip);
-  let active = points.length - 1, pinned = false;
-  function showPoint(index, showTooltip = true) {
+  const labelAttributes = {class: 'stack-band-label', 'font-size': 11, 'font-weight': 600, 'font-family': 'inherit', 'text-anchor': 'end', 'dominant-baseline': 'middle', fill: '#263b32', stroke: '#fff', 'stroke-opacity': .82, 'stroke-width': 3, 'stroke-linejoin': 'round', 'paint-order': 'stroke', 'pointer-events': 'none', 'aria-hidden': 'true'};
+  const measurement = svgElement('text', {...labelAttributes, visibility: 'hidden'});
+  svg.append(measurement);
+  const bandLabels = stackBandLabels({series, points, layers, x, y, left, right: width - right, measureText: name => {
+    measurement.textContent = name;
+    return measurement.getComputedTextLength();
+  }});
+  measurement.remove();
+  const labelNodes = bandLabels.map(item => {
+    const node = svgElement('text', {...labelAttributes, x: item.x, y: item.y}, item.name);
+    svg.append(node); return {node, seriesIndex: item.seriesIndex};
+  });
+  let active = points.length - 1, activeSeries = null, pinned = false;
+  function showPoint(index, showTooltip = true, seriesIndex = activeSeries, pointerX) {
     active = Math.max(0, Math.min(points.length - 1, index));
+    activeSeries = seriesIndex;
     const point = points[active];
     const cx = x(point.timestamp);
+    paths.forEach((path, index) => path.style.opacity = activeSeries === null || activeSeries === index ? '1' : '.35');
+    labelNodes.forEach(({node, seriesIndex}) => node.style.opacity = activeSeries === null || activeSeries === seriesIndex ? '1' : '.35');
     cursor.setAttribute('x1', cx); cursor.setAttribute('x2', cx); cursor.setAttribute('visibility', showTooltip ? 'visible' : 'hidden');
     details.replaceChildren();
     const heading = element('div', 'snapshot-heading'); heading.id = 'snapshot-heading';
@@ -90,37 +105,56 @@ export function renderStackedChart({container, navigator, legend, details, range
     const rows = series.map((item, i) => ({...item, value: point.values[i]})).sort((a, b) => (b.value ?? -1) - (a.value ?? -1));
     const list = element('div', 'snapshot-list');
     for (const item of rows) {
-      const row = element('div', 'snapshot-row');
+      const row = element('div', `snapshot-row${series[activeSeries]?.id === item.id ? ' is-highlighted' : ''}`);
       row.append(colorDot(colors.get(item.id)), element('span', 'snapshot-name', item.name), element('strong', '', item.value === null ? '未观测' : format(item.value)), element('span', 'snapshot-percent', item.value === null || !point.value ? '—' : `${(item.value / point.value * 100).toFixed(1)}%`));
       list.append(row);
     }
     details.append(heading, list);
-    tooltip.replaceChildren(element('span', '', `${dateLabel(point.timestamp)} UTC`), element('strong', '', `${format(point.value)} ${label}`));
-    for (const item of rows.slice(0, 5)) {
-      const row = element('div', 'tooltip-row'); row.append(colorDot(colors.get(item.id)), element('span', '', item.name), element('b', '', item.value === null ? '未观测' : format(item.value))); tooltip.append(row);
+    tooltip.replaceChildren(element('span', '', `${dateLabel(point.timestamp)} UTC${pinned ? ' · 已固定' : ''}`));
+    if (activeSeries !== null) {
+      const item = series[activeSeries], value = point.values[activeSeries];
+      const share = value === null || !point.value ? '—' : `${(value / point.value * 100).toFixed(1)}%`;
+      const name = element('div', 'tooltip-repository');
+      name.append(colorDot(colors.get(item.id)), element('span', '', item.name));
+      tooltip.append(name, element('strong', 'tooltip-value', value === null ? '未观测' : view.percent ? share : `${format(value)} ${label}`), element('small', 'tooltip-context', `${view.percent ? value === null ? '未观测' : `${format(value)} ${label}` : share} · 可见合计 ${format(point.value)} ${label}`));
+    } else {
+      tooltip.append(element('strong', '', `可见合计 ${format(point.value)} ${label}`));
+      for (const item of rows.slice(0, 5)) {
+        const row = element('div', 'tooltip-row'); row.append(colorDot(colors.get(item.id)), element('span', '', item.name), element('b', '', item.value === null ? '未观测' : format(item.value))); tooltip.append(row);
+      }
+      if (rows.length > 5) tooltip.append(element('small', '', `其余 ${rows.length - 5} 个仓库见下方快照明细`));
     }
-    if (rows.length > 5) tooltip.append(element('small', '', `其余 ${rows.length - 5} 个仓库见下方快照明细`));
     tooltip.hidden = !showTooltip;
-    tooltip.style.left = `${Math.max(0, Math.min(width - tooltip.offsetWidth, cx + 16 + tooltip.offsetWidth > width ? cx - tooltip.offsetWidth - 12 : cx + 12))}px`;
+    const anchor = pointerX ?? cx;
+    tooltip.style.left = `${Math.max(0, Math.min(width - tooltip.offsetWidth, anchor + 16 + tooltip.offsetWidth > width ? anchor - tooltip.offsetWidth - 12 : anchor + 12))}px`;
     tooltip.style.top = '12px';
   }
   function pointAt(event) {
     const rect = svg.getBoundingClientRect();
-    const time = min + Math.max(0, Math.min(1, ((event.clientX - rect.left) / rect.width * width - left) / plotWidth)) * span;
-    let low = 0, high = points.length - 1;
-    while (low < high) { const middle = Math.ceil((low + high) / 2); if (Date.parse(points[middle].timestamp) <= time) low = middle; else high = middle - 1; }
-    return low;
+    const px = (event.clientX - rect.left) / rect.width * width;
+    const py = (event.clientY - rect.top) / rect.height * height;
+    const hit = stackedHitTest({points, layers, x: px, y: py, left, top, plotWidth, plotHeight, maximum});
+    return hit && {...hit, x: px};
   }
-  svg.addEventListener('pointermove', event => { if (!pinned) showPoint(pointAt(event)); });
-  svg.addEventListener('pointerleave', () => { if (!pinned && document.activeElement !== svg) showPoint(points.length - 1, false); });
-  svg.addEventListener('click', event => { pinned = !pinned; showPoint(pointAt(event)); });
+  svg.addEventListener('pointermove', event => {
+    if (pinned) return;
+    const hit = pointAt(event);
+    if (hit) showPoint(hit.pointIndex, true, hit.seriesIndex, hit.x);
+    else showPoint(points.length - 1, false, null);
+  });
+  svg.addEventListener('pointerleave', () => { if (!pinned && document.activeElement !== svg) showPoint(points.length - 1, false, null); });
+  svg.addEventListener('click', event => {
+    const hit = pointAt(event);
+    if (!hit) return;
+    pinned = !pinned; showPoint(hit.pointIndex, true, hit.seriesIndex, hit.x);
+  });
   svg.addEventListener('dblclick', () => { view.range = null; onRangeChange?.(); rerender(); });
   svg.addEventListener('focus', () => showPoint(active));
-  svg.addEventListener('blur', () => { if (!pinned) showPoint(points.length - 1, false); });
+  svg.addEventListener('blur', () => { if (!pinned) showPoint(points.length - 1, false, null); });
   svg.addEventListener('keydown', event => {
     if (!['ArrowLeft', 'ArrowRight', 'Home', 'End', 'Escape'].includes(event.key)) return;
     event.preventDefault(); pinned = event.key !== 'Escape';
-    showPoint(event.key === 'Home' ? 0 : ['End', 'Escape'].includes(event.key) ? points.length - 1 : active + (event.key === 'ArrowRight' ? 1 : -1), event.key !== 'Escape');
+    showPoint(event.key === 'Home' ? 0 : ['End', 'Escape'].includes(event.key) ? points.length - 1 : active + (event.key === 'ArrowRight' ? 1 : -1), event.key !== 'Escape', event.key === 'Escape' ? null : activeSeries);
   });
   showPoint(active, false);
   renderNavigator({navigator, points: full.points, range: [Date.parse(points[0].timestamp), Date.parse(points.at(-1).timestamp)], onChange: range => { view.range = range; onRangeChange?.(); rerender(); }});
@@ -133,6 +167,53 @@ export function stackLayers(points, count, percent = false) {
     const upper = points.map((point, i) => totals[i] += percent ? point.value ? (point.values[index] ?? 0) / point.value * 100 : 0 : point.values[index] ?? 0);
     return {lower, upper};
   });
+}
+
+function pointIndexAtTime(points, time) {
+  let low = 0, high = points.length - 1;
+  while (low < high) {
+    const middle = Math.ceil((low + high) / 2);
+    if (Date.parse(points[middle].timestamp) <= time) low = middle;
+    else high = middle - 1;
+  }
+  return low;
+}
+
+// Coordinates are in the SVG's own viewBox, not CSS/device pixels. Resolve the
+// carry-forward interval first, then its actual vertical band (also in % mode).
+export function stackedHitTest({points, layers, x, y, left, top, plotWidth, plotHeight, maximum}) {
+  if (!points.length || plotWidth <= 0 || plotHeight <= 0 || x < left || x > left + plotWidth || y < top || y > top + plotHeight) return null;
+  const first = Date.parse(points[0].timestamp), last = Date.parse(points.at(-1).timestamp);
+  const pointIndex = pointIndexAtTime(points, first + (x - left) / plotWidth * (last - first));
+  const value = (top + plotHeight - y) / plotHeight * maximum;
+  // At a shared boundary choose the upper layer, matching SVG paint order.
+  for (let index = layers.length - 1; index >= 0; index--) {
+    const lower = layers[index].lower[pointIndex], upper = layers[index].upper[pointIndex];
+    if (upper > lower && value >= lower && value <= upper) return {pointIndex, seriesIndex: index};
+  }
+  return {pointIndex, seriesIndex: null};
+}
+
+export function stackBandLabels({series, points, layers, x, y, left, right, measureText, minHeight = 22, padding = 8}) {
+  if (!points.length) return [];
+  const labels = [], last = points.length - 1;
+  const positions = points.map(point => x(point.timestamp));
+  for (const [index, item] of series.entries()) {
+    const textWidth = measureText(item.name);
+    if (!(textWidth > 0) || textWidth > Math.min(240, (right - left) * .48)) continue;
+    const textLeft = right - padding - textWidth;
+    const layer = layers[index];
+    let bandTop = y(layer.upper[last]), bandBottom = y(layer.lower[last]);
+    // The entire text rectangle must fit the band across every step underneath
+    // it, not merely inside a tall but zero-width final snapshot at the edge.
+    for (let i = last - 1; i >= 0 && positions[i + 1] > textLeft - 2; i--) {
+      bandTop = Math.max(bandTop, y(layer.upper[i]));
+      bandBottom = Math.min(bandBottom, y(layer.lower[i]));
+    }
+    if (bandBottom - bandTop < minHeight) continue;
+    labels.push({...item, seriesIndex: index, x: right - padding, y: (bandTop + bandBottom) / 2});
+  }
+  return labels;
 }
 
 function niceMaximum(value) {

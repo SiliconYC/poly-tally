@@ -22,11 +22,11 @@
 
 ## 当前运行方式
 
-`config.json` 发现 `SiliconYC` 名下授权可见的全部非 fork 仓库，包括私有仓库；归档仓库仍纳入，空仓库等待首次提交。GitHub Actions 每天北京时间 **09:17、21:17** 运行，也可以在 Actions 页面手动运行；GitHub 的定时触发可能延迟。推送 `dev` 会自动验证、采集并发布。
+`config.json` 发现 `SiliconYC` 名下授权可见的全部非 fork 仓库，包括私有仓库；GitHub Archived 仓库不采集、不展示、不计入任何数量或历史汇总，空仓库等待首次提交。GitHub Actions 每天北京时间 **09:17、21:17** 运行，也可以在 Actions 页面手动运行；GitHub 的定时触发可能延迟。推送 `dev` 会自动验证、采集并发布。
 
 页面可按全部、公开、私有范围筛选。公开仓库保留逐提交统计；私有仓库展示真实名称、日级规模及独立更新时间。浏览器不连接 GitHub API、不持有令牌。
 
-私有统计可以在本地使用现有 Git 凭证增量更新。配置 `POLY_TALLY_READ_TOKEN` 只读 Actions Secret 后，私有仓库也会自动采集；未配置时保留最近收到的脱敏私有快照，公开采集不会覆盖或伪装刷新私有数据。
+私有统计可以在本地使用现有 Git 凭证增量更新。配置 `POLY_TALLY_READ_TOKEN` 只读 Actions Secret 后，私有仓库也会自动采集；未配置时只能保留同一统计批次内的脱敏快照；本次重置不使用旧批次私有数据，公开页面明确显示“私有待重算”，不会伪装为已完成。
 
 普通采集是确定性程序，无需 AI 参与决策。网络失败、限流或权限撤回会保留上次成功结果并标记状态；真正需要人工处理时检查 Actions 日志或本地运行摘要即可。
 
@@ -104,6 +104,22 @@ python -m poly_tally collect --git-credential --include-private-metrics --privat
 
 Actions 将公开与私有计算分开。公开作业使用本仓库 `contents: read` 与公开缓存；可选私有作业使用专用只读 Secret，原始对象和 SQLite 不缓存或上传，只有验证后的日级规模可进入产物。独立持久化作业才拥有 `contents: write`，只写本项目 `tally-state`；部署作业只有 Pages 和 OIDC 权限。不会向源仓库写入。
 
+## 本次全量重算批次
+
+当前批次为 `active-default-branches-2026-10-21-v2`（工作流 `POLY_TALLY_DATASET_EPOCH`）。首次运行忽略旧检查点、SQLite 和解析缓存，重新读取当前默认分支，重建其完整第一父链历史；**不是清空图表历史**。已归档仓库完全排除。公开采集任何失败都会阻止首次重算发布；成功后 `tally-state/checkpoint.json` 记录新批次，后续公开运行恢复增量。
+
+私有凭证缺失或重算失败时，旧私有快照不会加入新批次；公开结果可以发布，`publication.privateStatus` 为 `pending-rebuild`、`privateUpdatedAt` 为 `null`。只有完整的同批次私有采集才能恢复展示。原批次本地状态及数据分支 Git 历史不被删除，但不参与新数字。
+
+本地复现全新公开重算（只读源仓库，不发布）：
+
+```bash
+export POLY_TALLY_DATASET_EPOCH=active-default-branches-2026-10-21-v2
+fresh_state="$(mktemp -d)"
+python -m poly_tally collect --public-only --state "$fresh_state" --refresh --checkpoint .poly-tally/checkpoint.json
+```
+
+验收：产物与检查点的 `datasetEpoch` 一致；首次检查点 `collection.failed=0`，`collection.recomputedCommits` 反映全量回填；每个公开仓库 `branch`/`head` 对应本轮默认分支，历史包含该分支的旧提交但没有废弃分支的失效后缀；产物不含 `archived` 仓库。没有私有新数据时必须保留 `pending-rebuild`，不能宣称全部统计完成。
+
 ## 持久化、恢复与冷数据
 
 默认状态目录 `.poly-tally/` 已被 Git 忽略。
@@ -133,7 +149,7 @@ python -m poly_tally collect --public-only
 
 `retire` 保留全部历史并标为冷数据，不再抓取新提交，但仍读取可用元数据以更新名称和公开状态；`resume` 恢复发现与同步。冷数据不计入当前活动总量，可以在历史档案查看。规则变化后若保有对象会离线重算；若对象丢失则保留原规则版本，界面隔离旧口径，不伪装成统一总量。
 
-Actions cache 只用于公开计算加速，不能保证永久存在。`tally-state/checkpoint.json` 保存公开仓库的完整统计检查点；同分支的 `private-metrics.json` 保存私有仓库名与日级规模，不保存私有源码、路径、blob 或 commit ID。每轮先恢复持久数据再扫描，旧缓存不能覆盖冷数据。无规模、口径或状态变化时不生成数据提交。请勿删除该数据分支。
+Actions cache 只用于公开计算加速，不能保证永久存在。`tally-state/checkpoint.json` 保存公开仓库的完整统计检查点；同分支的 `private-metrics.json` 保存私有仓库名与日级规模，不保存私有源码、路径、blob 或 commit ID。每轮只恢复同一 `datasetEpoch` 的持久数据再扫描，旧批次和旧缓存不能复活失效历史。无规模、口径或状态变化时不生成数据提交。请勿删除该数据分支。
 
 ```bash
 python -m poly_tally checkpoint --public-only --checkpoint /备份目录/checkpoint.json
@@ -152,7 +168,8 @@ python -m poly_tally collect --public-only --import-checkpoint /备份目录/che
 
 | 状态 | 含义 |
 | --- | --- |
-| `active` / `archived` | 当前口径成功快照，进入默认总量 |
+| `active` | 当前口径成功快照，进入默认总量 |
+| `archived` | GitHub 已归档，不抓取源码、不展示、不计入任何统计；内部仅留排除证据 |
 | `empty` | 等待首个提交，不计入代码仓库总数 |
 | `inaccessible` | 本轮不可访问，保留上次历史，默认不计入当前总量 |
 | `stale` | 分支或规则改变后重建失败，旧版本明确标为过期 |
@@ -167,7 +184,7 @@ python -m poly_tally collect --public-only --import-checkpoint /备份目录/che
 
 `.github/workflows/pages.yml` 依次运行 Python / Node 测试、恢复状态、采集、保存公开检查点、上传并部署静态页面。前端没有运行时 CDN 依赖，所有链接和数据请求都支持 `/poly-tally/` 项目路径。
 
-`web/data/stats.json` 是公开基线，`web/data/private-metrics.json` 是脱敏私有基线。构建时合并，后续优先从持久数据分支及本轮作业取得最新规模，无需反复向 `dev` 提交统计。`--refresh` 刷新产物时间，私有更新时间单独显示。`dev` 保存代码，`tally-state` 保存可公开采集状态。
+`web/data/stats.json` 是公开基线，`web/data/private-metrics.json` 是脱敏私有基线。只有 `datasetEpoch` 相同才能构建合并，后续优先从持久数据分支及本轮作业取得最新规模，无需反复向 `dev` 提交统计。`--refresh` 刷新产物时间，私有更新时间单独显示。`dev` 保存代码，`tally-state` 保存可公开采集状态。
 
 ## 验收复现
 

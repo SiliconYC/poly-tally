@@ -214,3 +214,26 @@ test('adopting an older scan preserves the complete newer file byte for byte', a
   await assert.rejects(metricsModule.adoptPrivateMetrics(baseline, candidate, publicFile), /older/);
   assert.equal(await readFile(baseline, 'utf8'), original);
 });
+
+test('archived records never contribute names, history, counts or totals after merge', () => {
+  const result = mergePrivateMetrics(publicStats([publicRepository('202', {status: 'archived'})]), envelope([privateRepository('101', {status: 'archived'})]));
+  assert.deepEqual(result.repositories, []);
+  assert.equal(result.summary.code, 0);
+  assert.equal(result.publication.privateRepositories, 0);
+});
+
+test('confirmed hashed archive evidence permits private scope reduction, not arbitrary disappearance', () => {
+  const previous = envelope();
+  const next = {...envelope([]), archivedRepositoryKeys: [keyFor('101')]};
+  assert.equal(metricsModule.validatePrivateMetricsReplacement(previous, next), true);
+  assert.throws(() => metricsModule.validatePrivateMetricsReplacement(previous, {...next, archivedRepositoryKeys: []}), /scope/);
+  assert.throws(() => validatePrivateMetrics({...next, archivedRepositoryKeys: ['private/name']}));
+});
+
+test('dataset epochs cannot mix and scope reset requires explicit replacement authorization', () => {
+  const previous = envelope();
+  const next = {...envelope([]), datasetEpoch: 'reset-test-v2', archivedRepositoryKeys: []};
+  assert.throws(() => mergePrivateMetrics({...publicStats([]), datasetEpoch: 'reset-test-v2'}, previous), /epoch/i);
+  assert.throws(() => metricsModule.validatePrivateMetricsReplacement(previous, next), /epoch/i);
+  assert.equal(metricsModule.validatePrivateMetricsReplacement(previous, next, undefined, {resetEpoch: 'reset-test-v2'}), true);
+});
