@@ -38,8 +38,8 @@
 
 :root {
   --radius: 0.625rem;
-  --background: oklch(0.985 0 0);
-  --foreground: oklch(0.205 0 0);
+  --background: oklch(0.977 0.003 90);
+  --foreground: oklch(0.23 0.025 260);
   --card: oklch(1 0 0);
   --card-foreground: oklch(0.205 0 0);
   --popover: oklch(1 0 0);
@@ -53,7 +53,7 @@
   --accent: oklch(0.97 0 0);
   --accent-foreground: oklch(0.205 0 0);
   --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
+  --border: oklch(0.915 0.007 260);
   --input: oklch(0.922 0 0);
   --ring: oklch(0.708 0 0);
   --chart-1: #0d9488;
@@ -91,6 +91,16 @@
   body {
     @apply bg-background text-foreground font-sans antialiased;
     margin: 0;
+    cursor: default;
+    user-select: none;
+    caret-color: transparent;
+  }
+  input,
+  textarea,
+  [contenteditable]:not([contenteditable="false"]) {
+    user-select: text;
+    caret-color: auto;
+    cursor: text;
   }
   button:not(:disabled),
   [role="button"]:not([aria-disabled="true"]),
@@ -105,6 +115,10 @@
   }
 }
 
+[data-slot="table-body"] [data-slot="table-row"]:nth-child(even) {
+  background: color-mix(in oklab, var(--muted) 35%, transparent);
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -112,4 +126,19 @@
     animation-duration: 0.01ms !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+[data-slot="chart"] .recharts-brush-slide {
+  fill: var(--primary);
+  fill-opacity: 0.06;
+  stroke: var(--primary);
+  stroke-opacity: 0.25;
+}
+[data-slot="chart"] .recharts-brush-traveller rect {
+  fill: var(--card);
+  stroke: var(--primary);
+  rx: 3;
+}
+[data-slot="chart"] .recharts-brush-traveller line {
+  stroke: var(--primary);
 }

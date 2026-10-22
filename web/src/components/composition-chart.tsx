@@ -7,13 +7,7 @@ import {
   METRIC_LABELS,
 } from "../../model.mjs";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   ChartContainer,
   ChartTooltip,
@@ -35,8 +29,6 @@ type Props = {
   metric: Metric;
   language: string;
   colors: Map<string, string>;
-  onLanguageChange: (language: string) => void;
-  onRepositorySelect: (id: string) => void;
   onCopy: (repository: Repository) => void;
 };
 type Item = { id: string; name: string; value: number; color: string };
@@ -44,16 +36,30 @@ const palette = [
   "#0d9488",
   "#3b82f6",
   "#8b5cf6",
-  "#f59e0b",
-  "#e879a2",
+  "#d69b32",
+  "#0891b2",
   "#64748b",
-  "#06b6d4",
+  "#6366f1",
 ];
+const languageColors: Record<string, string> = {
+  Python: "#0d9488",
+  C: "#3b82f6",
+  "C++": "#6366f1",
+  "C#": "#8b5cf6",
+  TypeScript: "#3b82f6",
+  JavaScript: "#d69b32",
+  TSX: "#8b5cf6",
+  Go: "#0891b2",
+  Rust: "#c47b43",
+  Markdown: "#64748b",
+  HTML: "#db8a52",
+  CSS: "#9b7acb",
+};
 function languageColor(name: string) {
   let hash = 0;
   for (const character of name)
     hash = (hash * 31 + character.charCodeAt(0)) >>> 0;
-  return palette[hash % palette.length];
+  return languageColors[name] ?? palette[hash % palette.length];
 }
 
 export function CompositionChart({
@@ -61,8 +67,6 @@ export function CompositionChart({
   metric,
   language,
   colors,
-  onLanguageChange,
-  onRepositorySelect,
   onCopy,
 }: Props) {
   const [dimension, setDimension] = useState("language");
@@ -112,29 +116,19 @@ export function CompositionChart({
       ),
     [items],
   );
-  const slices = useMemo(
-    () => items.map((item, index) => ({ ...item, chartKey: `slice${index}` })),
-    [items],
-  );
-  const choose = (item: Item) =>
-    dimension === "repository"
-      ? onRepositorySelect(item.id)
-      : onLanguageChange(item.name);
   const percentage = (value: number) =>
     (value / total) * 100 < 0.1
       ? "<0.1%"
       : `${((value / total) * 100).toFixed(1)}%`;
 
   return (
-    <Card className="min-w-0">
-      <CardHeader className="gap-3">
-        <div className="space-y-1.5">
-          <CardTitle>规模构成</CardTitle>
-          <CardDescription>
-            {METRIC_LABELS[metric]} · 最新已知快照 · 点击明细筛选
-          </CardDescription>
-        </div>
-        <div className="flex flex-wrap items-center justify-between gap-2">
+    <Card
+      data-panel="composition"
+      className="@container min-w-0 gap-0 overflow-hidden rounded-lg border-border/70 py-0 shadow-none"
+    >
+      <CardHeader className="flex flex-wrap items-center justify-between gap-x-4 gap-y-3 border-b border-border/60 px-5 py-4">
+        <CardTitle className="text-base font-medium">规模构成</CardTitle>
+        <div className="ml-auto flex flex-wrap items-center gap-2">
           <Tabs
             value={dimension}
             onValueChange={(value) => {
@@ -142,13 +136,17 @@ export function CompositionChart({
               setActive(null);
             }}
           >
-            <TabsList aria-label="构成维度">
-              <TabsTrigger value="language">语言</TabsTrigger>
-              <TabsTrigger value="repository">仓库</TabsTrigger>
+            <TabsList aria-label="构成维度" className="h-8">
+              <TabsTrigger value="language" className="text-xs">
+                语言
+              </TabsTrigger>
+              <TabsTrigger value="repository" className="text-xs">
+                仓库
+              </TabsTrigger>
             </TabsList>
           </Tabs>
           <Select value={sorting} onValueChange={setSorting}>
-            <SelectTrigger aria-label="构成排序" className="w-32">
+            <SelectTrigger aria-label="构成排序" className="h-8 w-28 text-xs">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -160,12 +158,12 @@ export function CompositionChart({
           </Select>
         </div>
       </CardHeader>
-      <CardContent className="space-y-3">
+      <CardContent className="p-5">
         {total > 0 ? (
-          <>
+          <div className="grid min-w-0 gap-5 @min-[560px]:grid-cols-[230px_minmax(0,1fr)] @min-[560px]:items-center">
             <ChartContainer
               config={config}
-              className="mx-auto h-[250px] w-full max-w-[350px] aspect-square"
+              className="mx-auto h-[250px] w-full max-w-[290px] aspect-square"
             >
               <PieChart accessibilityLayer={false}>
                 <ChartTooltip
@@ -182,23 +180,22 @@ export function CompositionChart({
                   }
                 />
                 <Pie
-                  data={slices}
+                  data={items}
                   dataKey="value"
                   nameKey="name"
-                  innerRadius={72}
+                  innerRadius={73}
                   outerRadius={106}
                   strokeWidth={2}
                   stroke="var(--background)"
                   isAnimationActive={false}
                   onMouseEnter={(_, index) => setActive(items[index].id)}
                   onMouseLeave={() => setActive(null)}
-                  onClick={(_, index) => choose(items[index])}
                 >
                   {items.map((item) => (
                     <Cell
                       key={item.id}
                       fill={item.color}
-                      opacity={!selected || selected.id === item.id ? 1 : 0.25}
+                      opacity={!selected || selected.id === item.id ? 1 : 0.3}
                     />
                   ))}
                   <Label
@@ -225,7 +222,7 @@ export function CompositionChart({
                           <tspan
                             x={viewBox.cx}
                             dy="27"
-                            className="fill-foreground text-2xl font-semibold"
+                            className="fill-foreground text-2xl font-semibold tabular-nums"
                           >
                             {compact(selected?.value ?? total)}
                           </tspan>
@@ -245,69 +242,73 @@ export function CompositionChart({
                 </Pie>
               </PieChart>
             </ChartContainer>
-            <div
-              className="max-h-[310px] space-y-1 overflow-auto"
-              aria-label={
-                dimension === "repository" ? "仓库构成明细" : "语言构成明细"
-              }
-            >
-              {items.map((item) => (
-                <div
-                  key={item.id}
-                  className={`flex items-center gap-1 rounded-md ${active === item.id ? "bg-muted" : ""}`}
-                  onMouseEnter={() => setActive(item.id)}
-                  onMouseLeave={() => setActive(null)}
-                  onFocus={() => setActive(item.id)}
-                  onBlur={() => setActive(null)}
-                >
-                  <Button
-                    variant="ghost"
-                    className="h-auto min-h-11 min-w-0 flex-1 justify-start gap-2 px-2 py-2 font-normal"
-                    aria-label={`${dimension === "repository" ? "筛选仓库" : "筛选语言"} ${item.name}`}
-                    onClick={() => choose(item)}
+            <div className="min-w-0">
+              <div className="mb-2 flex justify-between px-2 text-xs text-muted-foreground">
+                <span>{dimension === "repository" ? "仓库" : "语言"}</span>
+                <span>{METRIC_LABELS[metric]} / 占比</span>
+              </div>
+              <ul
+                className="max-h-72 divide-y divide-border/50 overflow-auto"
+                aria-label={
+                  dimension === "repository" ? "仓库构成明细" : "语言构成明细"
+                }
+              >
+                {items.map((item) => (
+                  <li
+                    key={item.id}
+                    tabIndex={0}
+                    className={`flex min-h-11 items-center gap-2 rounded-md px-2 outline-none focus-visible:ring-2 focus-visible:ring-ring/50 ${active === item.id ? "bg-muted/50" : ""}`}
+                    onMouseEnter={() => setActive(item.id)}
+                    onMouseLeave={() => setActive(null)}
+                    onFocus={() => setActive(item.id)}
+                    onBlur={(event) => {
+                      if (!event.currentTarget.contains(event.relatedTarget))
+                        setActive(null);
+                    }}
                   >
                     <span
                       className="size-2 shrink-0 rounded-full"
                       style={{ background: item.color }}
                     />
-                    <span
-                      className="min-w-0 flex-1 truncate text-left"
-                      title={item.name}
-                    >
-                      {item.name}
+                    {dimension === "repository" ? (
+                      <Button
+                        variant="ghost"
+                        className="h-8 min-w-0 flex-1 justify-start gap-1.5 px-0 font-normal hover:bg-transparent"
+                        aria-label={`复制完整仓库名称 ${repositories.find((repository) => repository.id === item.id)?.name ?? item.name}`}
+                        onClick={() => {
+                          const repository = repositories.find(
+                            (repository) => repository.id === item.id,
+                          );
+                          if (repository) onCopy(repository);
+                        }}
+                      >
+                        <span className="truncate" title={item.name}>
+                          {item.name}
+                        </span>
+                        <Copy className="size-3 shrink-0 text-muted-foreground" />
+                      </Button>
+                    ) : (
+                      <span
+                        className="min-w-0 flex-1 truncate text-sm"
+                        title={item.name}
+                      >
+                        {item.name}
+                      </span>
+                    )}
+                    <span className="text-sm tabular-nums">
+                      {format(item.value)}
                     </span>
-                    <span className="tabular-nums">{format(item.value)}</span>
-                    <span className="w-14 text-right text-xs tabular-nums text-muted-foreground">
+                    <span className="w-14 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
                       {percentage(item.value)}
                     </span>
-                  </Button>
-                  {dimension === "repository" && (
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="shrink-0"
-                      aria-label={`复制完整仓库名称 ${repositories.find((repository) => repository.id === item.id)?.name ?? item.name}`}
-                      onClick={() => {
-                        const repository = repositories.find(
-                          (repository) => repository.id === item.id,
-                        );
-                        if (repository) onCopy(repository);
-                      }}
-                    >
-                      <Copy className="size-3.5" />
-                    </Button>
-                  )}
-                </div>
-              ))}
+                  </li>
+                ))}
+              </ul>
             </div>
-            <p className="text-xs text-muted-foreground">
-              合计 {format(total)} {METRIC_LABELS[metric]} · {items.length}{" "}
-              {dimension === "repository" ? "个仓库" : "种语言"}
-            </p>
-          </>
+          </div>
         ) : (
-          <div className="flex min-h-72 items-center justify-center rounded-lg border border-dashed text-sm text-muted-foreground">
-            当前筛选下暂无{dimension === "repository" ? "仓库" : "语言"}数据。
+          <div className="flex min-h-64 items-center justify-center text-sm text-muted-foreground">
+            暂无{dimension === "repository" ? "仓库" : "语言"}数据
           </div>
         )}
       </CardContent>

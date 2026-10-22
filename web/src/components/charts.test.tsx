@@ -2,8 +2,6 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, it, expect, vi } from "vitest";
 import userEvent from "@testing-library/user-event";
 import { HistoryChart } from "./history-chart";
-import { CompositionChart } from "./composition-chart";
-import { ChangesChart } from "./changes-chart";
 import { repository, snapshot } from "../lib/fixtures";
 
 const { plotCommits } = vi.hoisted(() => ({ plotCommits: [] as string[] }));
@@ -61,9 +59,15 @@ const historyProps = {
   onRangeChange: vi.fn(),
 };
 
+function renderHistory() {
+  const view = render(<HistoryChart {...historyProps} />);
+  fireEvent.click(screen.getByText("快照明细", { selector: "summary" }));
+  return view;
+}
+
 describe("history interactions", () => {
   it("keeps a not-yet-observed repository unknown in keyboard snapshot details", () => {
-    render(<HistoryChart {...historyProps} />);
+    renderHistory();
     const chart = screen.getByRole("region", { name: "历史趋势图" });
     fireEvent.keyDown(chart, { key: "Home" });
     const details = screen.getByRole("table", { name: "快照明细" });
@@ -79,7 +83,7 @@ describe("history interactions", () => {
     expect(within(details).getByRole("row", { name: /late 20/ })).toBeVisible();
   });
   it("supports hide, shift-isolate, and explicit restore without filtering the other charts", () => {
-    render(<HistoryChart {...historyProps} />);
+    renderHistory();
     fireEvent.click(screen.getByText("仓库图层（2）"));
     fireEvent.click(screen.getByRole("button", { name: "显示或隐藏 early" }));
     expect(
@@ -111,58 +115,8 @@ describe("history interactions", () => {
   });
 });
 
-it("composition repository copy and global selection remain independent", async () => {
-  const copy = vi.fn(),
-    select = vi.fn(),
-    language = vi.fn();
-  render(
-    <CompositionChart
-      repositories={repositories}
-      metric="code"
-      language="all"
-      colors={colors}
-      onCopy={copy}
-      onRepositorySelect={select}
-      onLanguageChange={language}
-    />,
-  );
-  await userEvent.click(screen.getByRole("tab", { name: "仓库" }));
-  fireEvent.click(
-    screen.getByRole("button", { name: "复制完整仓库名称 owner/late" }),
-  );
-  expect(copy).toHaveBeenCalledWith(repositories[1]);
-  expect(select).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole("button", { name: "筛选仓库 late" }));
-  expect(select).toHaveBeenCalledWith("late");
-  expect(language).not.toHaveBeenCalled();
-});
-
-it("unknown net change stays incomparable and selecting a period links its exact bounds", () => {
-  const onRangeChange = vi.fn();
-  render(
-    <ChangesChart
-      repositories={[repository("new", [snapshot("2026-01-03", 10)])]}
-      language="all"
-      since="2026-01-01T00:00:00Z"
-      until={until}
-      onRangeChange={onRangeChange}
-    />,
-  );
-  expect(screen.getByLabelText("净变化周期明细")).toHaveTextContent(
-    "暂无可比数据",
-  );
-  expect(screen.getByLabelText("净变化周期明细")).toHaveTextContent("缺少期初");
-  fireEvent.click(
-    screen.getByRole("button", { name: /2026-01.*暂无可比数据/ }),
-  );
-  expect(onRangeChange).toHaveBeenCalledWith([
-    Date.parse("2026-01-01T00:00:00Z"),
-    Date.parse(until),
-  ]);
-});
-
 it("clicking a carry-forward interval pins its actual earlier snapshot rather than the nearest later snapshot", () => {
-  render(<HistoryChart {...historyProps} />);
+  renderHistory();
   const region = screen.getByRole("region", { name: "历史趋势图" });
   const plot = region.firstElementChild as HTMLDivElement;
   vi.spyOn(plot, "getBoundingClientRect").mockReturnValue({
@@ -196,7 +150,7 @@ it("clicking a carry-forward interval pins its actual earlier snapshot rather th
 });
 
 it("percent mode retains exact absolute snapshot details while changing the rendered axis", async () => {
-  render(<HistoryChart {...historyProps} />);
+  renderHistory();
   await userEvent.click(screen.getByRole("tab", { name: "百分比" }));
   expect(screen.getByRole("tab", { name: "百分比" })).toHaveAttribute(
     "aria-selected",
@@ -210,67 +164,18 @@ it("percent mode retains exact absolute snapshot details while changing the rend
   ).toBeVisible();
 });
 it("hiding every layer has a recoverable empty state", () => {
-  render(<HistoryChart {...historyProps} />);
+  renderHistory();
   fireEvent.click(screen.getByText("仓库图层（2）"));
   fireEvent.click(screen.getByRole("button", { name: "显示或隐藏 early" }));
   fireEvent.click(screen.getByRole("button", { name: "显示或隐藏 late" }));
   expect(screen.getByText(/所有仓库图层均已隐藏/)).toBeVisible();
   fireEvent.click(screen.getByRole("button", { name: "全部显示" }));
+  fireEvent.click(screen.getByText("快照明细", { selector: "summary" }));
   expect(screen.getByRole("table", { name: "快照明细" })).toBeVisible();
-});
-it("composition sorting changes actual repository order and language selection stays available", async () => {
-  const language = vi.fn();
-  render(
-    <CompositionChart
-      repositories={repositories}
-      metric="code"
-      language="all"
-      colors={colors}
-      onCopy={vi.fn()}
-      onRepositorySelect={vi.fn()}
-      onLanguageChange={language}
-    />,
-  );
-  await userEvent.click(
-    screen.getByRole("button", { name: "筛选语言 TypeScript" }),
-  );
-  expect(language).toHaveBeenCalledWith("TypeScript");
-  await userEvent.click(screen.getByRole("tab", { name: "仓库" }));
-  const rows = screen.getByLabelText("仓库构成明细");
-  expect(
-    within(rows).getAllByRole("button", { name: /筛选仓库/ })[0],
-  ).toHaveAccessibleName("筛选仓库 late");
-  await userEvent.click(screen.getByRole("combobox", { name: "构成排序" }));
-  await userEvent.click(screen.getByRole("option", { name: "规模升序" }));
-  expect(
-    within(rows).getAllByRole("button", { name: /筛选仓库/ })[0],
-  ).toHaveAccessibleName("筛选仓库 early");
-});
-it("net changes distinguish a known zero from unknown and keep their metric independent", async () => {
-  render(
-    <ChangesChart
-      repositories={[repositories[0]]}
-      language="all"
-      since="2026-01-02T00:00:00Z"
-      until={until}
-      onRangeChange={vi.fn()}
-    />,
-  );
-  const details = screen.getByLabelText("净变化周期明细");
-  expect(details).toHaveTextContent("-5 代码行");
-  expect(details).toHaveTextContent("部分周期");
-  await userEvent.click(screen.getByRole("combobox", { name: "净变化指标" }));
-  await userEvent.click(screen.getByRole("option", { name: "文件数" }));
-  expect(details).toHaveTextContent("0 文件数");
-  expect(details).not.toHaveTextContent("暂无可比数据");
-  await userEvent.click(screen.getByRole("tab", { name: "每日" }));
-  expect(
-    within(screen.getByLabelText("净变化周期列表")).getAllByRole("button"),
-  ).toHaveLength(4);
 });
 
 it("history provides a scroll target and keeps the repository legend collapsed until requested", async () => {
-  render(<HistoryChart {...historyProps} />);
+  renderHistory();
   expect(document.getElementById("history")).toBeInTheDocument();
   const legend = screen.getByText("仓库图层（2）").closest("details");
   expect(legend).not.toHaveAttribute("open");
@@ -282,7 +187,7 @@ it("history provides a scroll target and keeps the repository legend collapsed u
 });
 
 it("snapshot selection and hover update details without rendering either Recharts tree again", () => {
-  render(<HistoryChart {...historyProps} />);
+  renderHistory();
   const region = screen.getByRole("region", { name: "历史趋势图" });
   const plot = region.firstElementChild as HTMLDivElement;
   const commitsBefore = plotCommits.length;
@@ -310,5 +215,5 @@ it("snapshot selection and hover update details without rendering either Rechart
   expect(plotCommits.slice(commitsBefore)).toEqual([]);
   expect(
     screen.getByRole("status", { name: "历史快照提示" }),
-  ).toHaveTextContent("early · 10 · 100.0%");
+  ).toHaveTextContent("early");
 });

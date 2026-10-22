@@ -20,7 +20,7 @@
 | `web/insights.mjs` | 复用日／周／月可比净变化与 CSV 序列化函数 |
 | `web/src/app.tsx` | 数据加载、全局筛选状态、六项概览和各视图组合 |
 | `web/src/lib/` | TypeScript 数据契约、展示适配、告警、格式与安全链接 |
-| `web/src/components/` | 历史趋势、规模构成、周期变化及仓库列表 |
+| `web/src/components/` | 历史趋势、规模构成、周期变化、仓库列表及 Floating UI 指针浮层 |
 | `web/src/components/ui/` | 来自官方 registry 的 shadcn/ui 基础组件与 Chart 容器 |
 | `vite.config.ts` | React / Tailwind 构建、路径别名、测试环境与 Pages 基路径 |
 | `scripts/build-site.mjs` | 完整输入校验、私有合并、展示窗口、Vite 构建与安全数据输出 |
@@ -31,7 +31,7 @@
 
 页面由 React 与 TypeScript 渲染，使用 Tailwind CSS 和本地 shadcn/ui 组件。`components.json` 采用 `new-york` 风格，基础组件与 Chart 源码取自 shadcn/ui 官方 `new-york-v4` registry；源码随项目维护，不依赖运行时 CDN。图表采用 shadcn/ui Chart 容器和 Recharts，不需要 Tremor。
 
-`App` 统一持有仓库选择、公开／私有范围、当前／档案模式、过期快照开关、语言和指标等全局筛选，并通过 `props` 与回调驱动各视图。时间范围也通过受控值协调趋势刷选与周期选择。图表内部只保留图例显隐、绝对值／占比、悬停或固定快照、构成维度与排序、净变化指标与周期等局部交互状态；隐藏趋势图层不会改写概览和列表使用的仓库集合。
+`App` 统一持有仓库选择、公开／私有范围、当前／档案模式、过期快照开关、语言和指标等全局筛选，并通过 `props` 与回调驱动各视图。历史窗口仅由趋势刷选、日期输入和恢复控件修改。构成图和净变化图没有修改全局筛选或历史窗口的回调，避免普通图表点击引发整页变化。图表内部只保留图例显隐、绝对值／占比、悬停或固定快照、构成维度与排序、净变化指标与周期等局部交互状态；隐藏趋势图层不会改写概览和列表使用的仓库集合。
 
 `web/model.mjs` 的纯数据逻辑和 `web/insights.mjs` 的纯计算导出渐进保留，由 TypeScript 适配层直接调用。React 层不重新实现同源组、未知期初、规则隔离、阶梯延续或 CSV 安全转义。既有 `.mjs` 测试继续保护这些口径，React 测试验证筛选和交互连接。旧原生 DOM / SVG 渲染文件及其实现绑定测试已经删除；交互改由 React 组件测试和真实浏览器测试覆盖，历史版本仍可从 Git 查阅。
 

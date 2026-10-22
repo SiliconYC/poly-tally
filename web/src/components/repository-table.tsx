@@ -25,13 +25,10 @@ import {
   METRIC_LABELS,
   latestTotals,
   repositoryDisplayName,
-  repositoryUpdatedAt,
-  STATUS_LABELS,
 } from "../../model.mjs";
 import { repositoryCsv } from "../../insights.mjs";
 import type { Repository } from "@/lib/types";
 import {
-  dateLabel,
   downloadCsv,
   format,
   metricOrder,
@@ -41,14 +38,7 @@ import {
 } from "@/lib/dashboard";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Table,
   TableBody,
@@ -127,10 +117,7 @@ export function RepositoryTable({
                     </Button>
                   )}
                 </div>
-                <p
-                  className="mt-0.5 text-xs text-muted-foreground"
-                  title={repository.notice}
-                >
+                <p className="sr-only" title={repository.notice}>
                   {repositoryContext(repository)}
                 </p>
               </div>
@@ -146,39 +133,6 @@ export function RepositoryTable({
           <span className="tabular-nums">{format(getValue() as number)}</span>
         ),
       })),
-      {
-        id: "updated",
-        accessorFn: (row) => repositoryUpdatedAt(row.repository) ?? "",
-        header: "最近更新",
-        cell: ({ getValue }) => (
-          <span className="text-xs text-muted-foreground whitespace-nowrap">
-            {dateLabel(getValue() as string).slice(0, 10)}
-          </span>
-        ),
-      },
-      {
-        id: "status",
-        accessorFn: (row) => row.repository.status,
-        header: "状态",
-        cell: ({ getValue }) => (
-          <Badge variant="outline" className="whitespace-nowrap font-normal">
-            {STATUS_LABELS[getValue() as string] ?? (getValue() as string)}
-          </Badge>
-        ),
-      },
-      {
-        id: "rules",
-        accessorFn: (row) => row.repository.rulesVersion,
-        header: "规则",
-        cell: ({ getValue }) => (
-          <span
-            className="font-mono text-xs text-muted-foreground"
-            title={getValue() as string}
-          >
-            {(getValue() as string).slice(0, 8)}
-          </span>
-        ),
-      },
     ],
     [onCopy],
   );
@@ -191,7 +145,7 @@ export function RepositoryTable({
     getSortedRowModel: getSortedRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
-    initialState: { pagination: { pageSize: 10 } },
+    initialState: { pagination: { pageSize: 100 } },
     globalFilterFn: (row, _column, filter) =>
       row.original.repository.name
         .toLocaleLowerCase()
@@ -205,7 +159,7 @@ export function RepositoryTable({
     [filtered, language],
   );
   return (
-    <Card className="gap-4" id="repositories">
+    <Card className="gap-4 shadow-none" id="repositories">
       <CardHeader>
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div className="space-y-1.5">
@@ -215,9 +169,6 @@ export function RepositoryTable({
                 {filtered.length} 个仓库
               </span>
             </CardTitle>
-            <CardDescription>
-              最新已知快照 · 按住 Shift 可追加排序
-            </CardDescription>
           </div>
           <Button
             variant="outline"
@@ -328,61 +279,62 @@ export function RepositoryTable({
                     {format(totals[key])}
                   </TableCell>
                 ))}
-                <TableCell colSpan={3} />
               </TableRow>
             </TableFooter>
           </Table>
         </div>
-        <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-muted-foreground">
-          <span>
-            显示{" "}
-            {filtered.length
-              ? table.getState().pagination.pageIndex *
-                  table.getState().pagination.pageSize +
-                1
-              : 0}
-            –
-            {Math.min(
-              (table.getState().pagination.pageIndex + 1) *
-                table.getState().pagination.pageSize,
-              filtered.length,
-            )}{" "}
-            / {format(filtered.length)} 项
-          </span>
-          <div className="flex items-center gap-2">
-            <SelectControl
-              label="每页仓库数"
-              value={String(table.getState().pagination.pageSize)}
-              onChange={(value) => table.setPageSize(Number(value))}
-              className="h-8"
-              options={[
-                ["10", "10 / 页"],
-                ["25", "25 / 页"],
-                ["50", "50 / 页"],
-              ]}
-            />
-            <Button
-              variant="outline"
-              size="icon"
-              className="size-8"
-              aria-label="上一页"
-              onClick={() => table.previousPage()}
-              disabled={!table.getCanPreviousPage()}
-            >
-              <ChevronLeft className="size-4" />
-            </Button>
-            <Button
-              variant="outline"
-              size="icon"
-              className="size-8"
-              aria-label="下一页"
-              onClick={() => table.nextPage()}
-              disabled={!table.getCanNextPage()}
-            >
-              <ChevronRight className="size-4" />
-            </Button>
+        {filtered.length > 100 && (
+          <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-muted-foreground">
+            <span>
+              显示{" "}
+              {filtered.length
+                ? table.getState().pagination.pageIndex *
+                    table.getState().pagination.pageSize +
+                  1
+                : 0}
+              –
+              {Math.min(
+                (table.getState().pagination.pageIndex + 1) *
+                  table.getState().pagination.pageSize,
+                filtered.length,
+              )}{" "}
+              / {format(filtered.length)} 项
+            </span>
+            <div className="flex items-center gap-2">
+              <SelectControl
+                label="每页仓库数"
+                value={String(table.getState().pagination.pageSize)}
+                onChange={(value) => table.setPageSize(Number(value))}
+                className="h-8"
+                options={[
+                  ["100", "100 / 页"],
+                  ["200", "200 / 页"],
+                  ["500", "500 / 页"],
+                ]}
+              />
+              <Button
+                variant="outline"
+                size="icon"
+                className="size-8"
+                aria-label="上一页"
+                onClick={() => table.previousPage()}
+                disabled={!table.getCanPreviousPage()}
+              >
+                <ChevronLeft className="size-4" />
+              </Button>
+              <Button
+                variant="outline"
+                size="icon"
+                className="size-8"
+                aria-label="下一页"
+                onClick={() => table.nextPage()}
+                disabled={!table.getCanNextPage()}
+              >
+                <ChevronRight className="size-4" />
+              </Button>
+            </div>
           </div>
-        </div>
+        )}
       </CardContent>
     </Card>
   );

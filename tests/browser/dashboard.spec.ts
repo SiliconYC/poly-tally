@@ -12,9 +12,28 @@ async function dataset(page: Page, data: Dataset) {
 async function open(page: Page, data: Dataset = fixture()) {
   await dataset(page, data);
   await page.goto("./");
-  await expect(
-    page.getByRole("heading", { name: "代码资产概览" }),
-  ).toBeVisible();
+  await expect(page.getByTestId("metric-code")).toBeVisible();
+}
+
+async function changeTooltip(page: Page, label: string) {
+  const panel = page.locator('[data-panel="changes"]');
+  const tick = panel
+    .locator("text")
+    .filter({ hasText: new RegExp(`^${label}$`) });
+  await expect(tick).toBeVisible();
+  await tick.scrollIntoViewIfNeeded();
+  const tickBounds = await tick.boundingBox();
+  const chartBounds = await panel.locator(".recharts-wrapper").boundingBox();
+  expect(tickBounds).not.toBeNull();
+  expect(chartBounds).not.toBeNull();
+  await page.mouse.move(
+    tickBounds!.x + tickBounds!.width / 2,
+    chartBounds!.y + chartBounds!.height / 2,
+  );
+  const tooltip = panel.locator(".recharts-tooltip-wrapper");
+  await expect(tooltip).toBeVisible();
+  await expect(tooltip).toContainText(label);
+  return tooltip;
 }
 
 test("production Pages subpath serves hashed assets, favicon and the actual empty baseline", async ({
@@ -27,8 +46,9 @@ test("production Pages subpath serves hashed assets, favicon and the actual empt
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
   await page.goto("./");
+  await expect(page.getByTestId("metric-code")).toBeVisible();
   await expect(
-    page.getByRole("heading", { name: "代码资产概览" }),
+    page.getByRole("heading", { name: "Poly Tally.", exact: true, level: 1 }),
   ).toBeVisible();
   expect(await page.locator("script[src]").last().getAttribute("src")).toMatch(
     /^\/poly-tally\/assets\/.*\.js$/,
@@ -59,6 +79,13 @@ test("global metric, visibility, language, picker selection, search and reset re
   await expect(
     page.getByRole("button", { name: "在 GitHub 打开 owner/beta（新标签页）" }),
   ).toHaveCount(0);
+  await page.getByRole("button", { name: "重置筛选", exact: true }).click();
+  await page.getByRole("combobox", { name: "语言筛选", exact: true }).click();
+  await page.getByRole("option", { name: "TypeScript", exact: true }).click();
+  await expect(page.getByRole("combobox", { name: "语言筛选" })).toContainText(
+    "TypeScript",
+  );
+  await expect(page.getByTestId("metric-code")).toHaveText("40");
   await page.getByRole("button", { name: "重置筛选", exact: true }).click();
   await page.getByRole("button", { name: "全部仓库", exact: true }).click();
   await page.getByRole("textbox", { name: "搜索可选仓库" }).fill("alpha");
@@ -93,6 +120,12 @@ test("history legend, snapshots, percent mode, dates, Brush and reset are intera
   await expect(
     page.getByRole("tab", { name: "百分比", exact: true }),
   ).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByRole("table", { name: "快照明细" })).not.toBeVisible();
+  await page
+    .locator("summary")
+    .filter({ hasText: /^快照明细$/ })
+    .click();
+  await expect(page.getByRole("table", { name: "快照明细" })).toBeVisible();
   const history = page.getByRole("region", { name: "历史趋势图" });
   await history.focus();
   await page.keyboard.press("Home");
@@ -143,27 +176,58 @@ test("history legend, snapshots, percent mode, dates, Brush and reset are intera
   );
 });
 
-test("language and repository composition, period and independent change metric work", async ({
+test("composition stays local while periods and an independent change metric preserve zero versus unknown", async ({
   page,
 }) => {
   await open(page);
   await page
-    .getByRole("button", { name: "筛选语言 TypeScript", exact: true })
+    .getByRole("list", { name: "语言构成明细" })
+    .getByRole("listitem")
+    .filter({ hasText: "TypeScript" })
     .click();
   await expect(page.getByRole("combobox", { name: "语言筛选" })).toContainText(
-    "TypeScript",
+    "全部语言",
   );
+  await expect(page.getByTestId("metric-code")).toHaveText("40");
   await page.getByRole("tab", { name: "仓库", exact: true }).click();
   await page
-    .getByRole("button", { name: "筛选仓库 beta", exact: true })
-    .click();
-  await expect(page.getByTestId("metric-code")).toHaveText("20");
+    .getByRole("list", { name: "仓库构成明细" })
+    .getByRole("listitem")
+    .filter({ hasText: "beta" })
+    .click({ position: { x: 5, y: 5 } });
+  await expect(page.getByTestId("metric-code")).toHaveText("40");
+  await expect(
+    page.getByRole("button", { name: "全部仓库", exact: true }),
+  ).toBeVisible();
   await page.getByRole("tab", { name: "每日", exact: true }).click();
+  await expect(
+    page.getByRole("tab", { name: "每日", exact: true }),
+  ).toHaveAttribute("aria-selected", "true");
+  await page.getByRole("tab", { name: "每周", exact: true }).click();
+  await expect(
+    page.getByRole("tab", { name: "每周", exact: true }),
+  ).toHaveAttribute("aria-selected", "true");
+  await page.getByRole("tab", { name: "每月", exact: true }).click();
+  const start = await page.getByLabel("时间范围开始日期 UTC").inputValue();
+  const end = await page.getByLabel("时间范围结束日期 UTC").inputValue();
+  await page
+    .locator(
+      '[data-panel="changes"] .recharts-bar-rectangle .recharts-rectangle',
+    )
+    .last()
+    .click();
+  await expect(page.getByLabel("时间范围开始日期 UTC")).toHaveValue(start);
+  await expect(page.getByLabel("时间范围结束日期 UTC")).toHaveValue(end);
   await page.getByRole("combobox", { name: "净变化指标", exact: true }).click();
   await page.getByRole("option", { name: "文件数", exact: true }).click();
-  await expect(page.getByLabel("净变化周期明细")).toContainText("文件数");
+  const unknown = await changeTooltip(page, "2026-01");
+  await expect(unknown).toContainText("暂无对比数据");
+  await expect(unknown).not.toContainText("0 文件数");
+  const zero = await changeTooltip(page, "2026-02");
+  await expect(zero).toContainText("0 文件数");
+  await expect(zero).not.toContainText("暂无对比数据");
   await expect(
-    page.getByRole("button", { name: "代码行 20", exact: true }),
+    page.getByRole("button", { name: "代码行 40", exact: true }),
   ).toHaveAttribute("aria-pressed", "true");
 });
 
@@ -242,17 +306,36 @@ test("pagination and additive multi-field sorting keep totals over the full filt
   page,
 }) => {
   const data = fixture();
-  data.repositories = Array.from({ length: 32 }, (_, i) =>
-    repository(`repo-${String(i).padStart(2, "0")}`, [
+  data.repositories = Array.from({ length: 105 }, (_, i) =>
+    repository(`repo-${String(i).padStart(3, "0")}`, [
       snapshot("2026-01-01", i + 1),
     ]),
   );
   await open(page, data);
   await expect(
     page.getByRole("button", { name: /复制完整仓库名称 owner\/repo-/ }),
-  ).toHaveCount(10);
+  ).toHaveCount(100);
+  await expect(page.getByText("显示 1–100 / 105 项")).toBeVisible();
   await page.getByRole("button", { name: "下一页", exact: true }).click();
-  await expect(page.getByText("显示 11–20 / 32 项")).toBeVisible();
+  await expect(page.getByText("显示 101–105 / 105 项")).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: /复制完整仓库名称 owner\/repo-/ }),
+  ).toHaveCount(5);
+  await page.getByRole("combobox", { name: "每页仓库数", exact: true }).click();
+  for (const size of [100, 200, 500])
+    await expect(
+      page.getByRole("option", { name: `${size} / 页`, exact: true }),
+    ).toBeVisible();
+  await page.getByRole("option", { name: "200 / 页", exact: true }).click();
+  await expect(
+    page.getByRole("button", { name: /复制完整仓库名称 owner\/repo-/ }),
+  ).toHaveCount(105);
+  await expect(page.getByText("显示 1–105 / 105 项")).toBeVisible();
+  await page.getByRole("combobox", { name: "每页仓库数", exact: true }).click();
+  await page.getByRole("option", { name: "100 / 页", exact: true }).click();
+  await expect(
+    page.getByRole("button", { name: /复制完整仓库名称 owner\/repo-/ }),
+  ).toHaveCount(100);
   await page.getByRole("button", { name: "按仓库排序", exact: true }).click();
   await page
     .getByRole("button", { name: "按代码行排序", exact: true })
@@ -266,7 +349,32 @@ test("pagination and additive multi-field sorting keep totals over the full filt
         ).length,
     ),
   ).toBe(2);
-  await expect(page.locator("tfoot")).toContainText("528");
+  await expect(page.locator("tfoot")).toContainText("5,565");
+  await page.getByRole("textbox", { name: "搜索仓库列表" }).fill("repo-");
+  await expect(page.getByText("显示 1–100 / 105 项")).toBeVisible();
+  await expect(page.locator("tfoot")).toContainText("5,565");
+  const allDownloadEvent = page.waitForEvent("download");
+  await page.getByRole("button", { name: "导出 CSV", exact: true }).click();
+  const allCsv = await readFile(
+    (await (await allDownloadEvent).path())!,
+    "utf8",
+  );
+  expect(allCsv.trimEnd().split(/\r?\n/)).toHaveLength(106);
+  expect(allCsv).toContain("repo-000,公开");
+  expect(allCsv).toContain("repo-104,公开");
+  await page.getByRole("textbox", { name: "搜索仓库列表" }).fill("repo-10");
+  await expect(page.getByText("5 个仓库", { exact: true })).toBeVisible();
+  await expect(page.locator("tfoot")).toContainText("515");
+  const searchedDownloadEvent = page.waitForEvent("download");
+  await page.getByRole("button", { name: "导出 CSV", exact: true }).click();
+  const searchedCsv = await readFile(
+    (await (await searchedDownloadEvent).path())!,
+    "utf8",
+  );
+  expect(searchedCsv.trimEnd().split(/\r?\n/)).toHaveLength(6);
+  expect(searchedCsv).toContain("repo-100,公开");
+  expect(searchedCsv).toContain("repo-104,公开");
+  expect(searchedCsv).not.toContain("repo-099,公开");
 });
 
 test("390px and 1440px support light/dark without page overflow and persist theme", async ({
@@ -323,7 +431,7 @@ test("published real data matches the existing model in every metric and leaves 
     await expect(page.getByTestId(`metric-${metric}`)).toHaveText(
       new Intl.NumberFormat("zh-CN").format(totals[metric]),
     );
-  await mkdir("docs/qa/react", { recursive: true });
+  await mkdir("docs/qa/react-refinement", { recursive: true });
   for (const width of [1440, 390]) {
     await page.setViewportSize({ width, height: 1100 });
     if (
@@ -333,12 +441,12 @@ test("published real data matches the existing model in every metric and leaves 
     )
       await page.getByRole("button", { name: "切换浅色模式" }).click();
     await page.screenshot({
-      path: `docs/qa/react/${width}-light.png`,
+      path: `docs/qa/react-refinement/${width}-light.png`,
       fullPage: true,
     });
     await page.getByRole("button", { name: "切换深色模式" }).click();
     await page.screenshot({
-      path: `docs/qa/react/${width}-dark.png`,
+      path: `docs/qa/react-refinement/${width}-dark.png`,
       fullPage: true,
     });
     await expect
@@ -394,6 +502,11 @@ test("large aligned histories render without discarding changes and remain inter
         ),
     );
     const percentMs = performance.now() - percent;
+    await page
+      .locator("summary")
+      .filter({ hasText: /^快照明细$/ })
+      .click();
+    await expect(page.getByRole("table", { name: "快照明细" })).toBeVisible();
     const keyboard = performance.now();
     await page.getByRole("region", { name: "历史趋势图" }).focus();
     await page.keyboard.press("Home");
@@ -419,10 +532,10 @@ test("large aligned histories render without discarding changes and remain inter
     expect(percentMs).toBeLessThan(6000);
     expect(keyboardMs).toBeLessThan(6000);
   }
-  await mkdir("docs/qa/react", { recursive: true });
+  await mkdir("docs/qa/react-refinement", { recursive: true });
   const { writeFile } = await import("node:fs/promises");
   await writeFile(
-    "docs/qa/react/browser-performance.json",
+    "docs/qa/react-refinement/browser-performance.json",
     JSON.stringify(
       {
         browser: await page.context().browser()!.version(),

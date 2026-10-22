@@ -1,0 +1,25 @@
+{
+  "browser": "156.0.8078.47",
+  "viewport": {
+    "width": 1440,
+    "height": 1100
+  },
+  "reports": [
+    {
+      "name": "distinct",
+      "repositories": 20,
+      "snapshots": 10000,
+      "renderMs": 3205,
+      "percentMs": 1795,
+      "keyboardMs": 136
+    },
+    {
+      "name": "repeated",
+      "repositories": 40,
+      "snapshots": 100000,
+      "renderMs": 2095,
+      "percentMs": 481,
+      "keyboardMs": 131
+    }
+  ]
+}

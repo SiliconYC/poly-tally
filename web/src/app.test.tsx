@@ -21,7 +21,7 @@ vi.mock("./components/changes-chart", () => ({
 it("loads six metrics and drives scope, metric and reset from a single state", async () => {
   const user = userEvent.setup();
   render(<App load={() => Promise.resolve(fixture())} />);
-  await screen.findByRole("heading", { name: "代码资产概览" });
+  await screen.findByTestId("metric-code");
   expect(screen.getByRole("button", { name: /总行数 52/ })).toBeInTheDocument();
   expect(screen.getByRole("button", { name: /代码行 40/ })).toHaveAttribute(
     "aria-pressed",
@@ -60,7 +60,8 @@ it("does not call an incomplete collection complete, and isolates mismatched rul
   data.repositories[0].rulesVersion = "old";
   render(<App load={() => Promise.resolve(data)} />);
   await screen.findByText(/全量重算未完成/);
-  expect(screen.getByText("采集未完整")).toBeInTheDocument();
+  await userEvent.click(screen.getByText("统计说明", { selector: "summary" }));
+  expect(screen.getByText("采集未完整")).toBeVisible();
   expect(screen.getByRole("button", { name: /代码行 20/ })).toBeInTheDocument();
 });
 it("searches the repository table and keeps CSV and totals scoped to visible search results", async () => {

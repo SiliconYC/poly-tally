@@ -9,13 +9,8 @@ import {
 } from "../../model.mjs";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { CursorTooltip } from "./cursor-tooltip";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ChartContainer } from "@/components/ui/chart";
 import type { ChartConfig } from "@/components/ui/chart";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -82,7 +77,7 @@ const HistoryPlot = memo(function HistoryPlot({
         margin={{ top: 12, right: 16, left: 12, bottom: 8 }}
         accessibilityLayer={false}
       >
-        <CartesianGrid vertical={false} />
+        <CartesianGrid vertical={false} strokeDasharray="3 3" />
         <XAxis
           dataKey="time"
           type="number"
@@ -136,7 +131,7 @@ const HistoryNavigator = memo(function HistoryNavigator({
   return (
     <ChartContainer
       config={navigatorConfig}
-      className="h-16 w-full aspect-auto"
+      className="h-11 w-full aspect-auto"
     >
       <AreaChart
         data={overview}
@@ -145,8 +140,8 @@ const HistoryNavigator = memo(function HistoryNavigator({
       >
         <Brush
           dataKey="time"
-          height={44}
-          travellerWidth={12}
+          height={30}
+          travellerWidth={8}
           stroke="var(--muted-foreground)"
           fill="var(--background)"
           tickFormatter={(value) => day(Number(value))}
@@ -206,6 +201,7 @@ export function HistoryChart({
   const [pinned, setPinned] = useState(false);
   const [hoveredColumn, setHoveredColumn] = useState<number | null>(null);
   const plot = useRef<HTMLDivElement>(null);
+  const [anchor, setAnchor] = useState<{ x: number; y: number } | null>(null);
   const ordered = useMemo(
     () =>
       rankRepositoriesByHistoricalArea(repositories, {
@@ -304,13 +300,29 @@ export function HistoryChart({
       setHoveredColumn(null);
       return;
     }
-    select(
-      event.key === "Home"
-        ? 0
-        : event.key === "End"
-          ? result.points.length - 1
-          : index + (event.key === "ArrowRight" ? 1 : -1),
+    const nextIndex = Math.max(
+      0,
+      Math.min(
+        result.points.length - 1,
+        event.key === "Home"
+          ? 0
+          : event.key === "End"
+            ? result.points.length - 1
+            : index + (event.key === "ArrowRight" ? 1 : -1),
+      ),
     );
+    select(nextIndex);
+    const rect = plot.current?.getBoundingClientRect();
+    if (rect && result.points[nextIndex])
+      setAnchor({
+        x:
+          rect.left +
+          56 +
+          ((Date.parse(result.points[nextIndex].timestamp) - start) /
+            (end - start || 1)) *
+            (rect.width - 72),
+        y: rect.top + rect.height / 2,
+      });
   }
   function pointerSelection(event: { clientX: number; clientY: number }) {
     const rect = plot.current?.getBoundingClientRect();
@@ -358,13 +370,19 @@ export function HistoryChart({
   }
 
   return (
-    <Card id="history" className="min-w-0 scroll-mt-24">
-      <CardHeader className="gap-3 sm:flex-row sm:items-start sm:justify-between">
+    <Card
+      id="history"
+      className="min-w-0 gap-0 overflow-hidden rounded-xl border-border/70 py-0 shadow-none scroll-mt-24"
+    >
+      <CardHeader className="flex flex-wrap items-center justify-between gap-3 border-b border-border/60 px-5 py-4">
         <div className="space-y-1.5">
-          <CardTitle>历史趋势</CardTitle>
-          <CardDescription>
-            按历史规模排列仓库 · {label} · UTC 阶梯存量
-          </CardDescription>
+          <CardTitle className="text-base font-medium">
+            历史趋势
+            <span className="ml-3 text-xs font-normal text-muted-foreground">
+              {label}
+            </span>
+          </CardTitle>
+          <span className="sr-only">{label}，按仓库的阶梯存量</span>
         </div>
         <Tabs
           value={percent ? "percent" : "absolute"}
@@ -376,9 +394,9 @@ export function HistoryChart({
           </TabsList>
         </Tabs>
       </CardHeader>
-      <CardContent className="space-y-5">
-        <details className="rounded-lg border p-3">
-          <summary className="cursor-pointer text-sm font-medium">
+      <CardContent className="space-y-4 p-5">
+        <details className="group">
+          <summary className="w-fit cursor-pointer list-none text-xs text-muted-foreground hover:text-foreground [&::-webkit-details-marker]:hidden">
             仓库图层（{ordered.length}）
           </summary>
           <div
@@ -462,18 +480,25 @@ export function HistoryChart({
                 onPointerMove={(event) => {
                   if (!pinned) {
                     const next = pointerSelection(event);
-                    if (next !== null) select(next.index, false, next.column);
+                    if (next !== null) {
+                      setAnchor({ x: event.clientX, y: event.clientY });
+                      select(next.index, false, next.column);
+                    }
                   }
                 }}
                 onPointerLeave={() => {
                   if (!pinned) {
                     setSelectedAt(null);
                     setHoveredColumn(null);
+                    setAnchor(null);
                   }
                 }}
                 onClick={(event) => {
                   const next = pointerSelection(event);
-                  if (next !== null) select(next.index, !pinned, next.column);
+                  if (next !== null) {
+                    setAnchor({ x: event.clientX, y: event.clientY });
+                    select(next.index, !pinned, next.column);
+                  }
                 }}
                 onDoubleClick={() => onRangeChange(null)}
               >
@@ -498,36 +523,40 @@ export function HistoryChart({
                         style={{ left: `${cursor * 100}%` }}
                       />
                     </div>
-                    <div
-                      role="status"
-                      aria-label="历史快照提示"
-                      className="pointer-events-none absolute top-3 right-5 max-w-[calc(100%-2.5rem)] rounded-lg border bg-background/95 p-3 text-xs shadow-md"
-                    >
-                      <p>{dateLabel(point.timestamp)} UTC</p>
-                      <p className="mt-1 font-medium">
-                        已知合计 {format(point.value)} {label}
-                      </p>
-                      {hoveredSeries && (
-                        <p className="mt-1">
-                          {hoveredSeries.name} ·{" "}
-                          {hoveredValue == null
-                            ? "尚未观测"
-                            : `${format(hoveredValue)} · ${(point.value ? (hoveredValue / point.value) * 100 : 0).toFixed(1)}%`}
+                    {anchor && (
+                      <CursorTooltip
+                        anchor={anchor}
+                        contextElement={plot.current}
+                      >
+                        <p className="text-muted-foreground">
+                          {dateLabel(point.timestamp)} UTC
                         </p>
-                      )}
-                      <p className="mt-1 text-muted-foreground">
-                        {pinned ? "已固定 · 点击释放" : "点击固定快照"}
-                      </p>
-                    </div>
+                        {hoveredSeries && (
+                          <p className="mt-2 flex justify-between gap-6">
+                            <span className="truncate font-medium">
+                              {hoveredSeries.name}
+                            </span>
+                            <span className="tabular-nums">
+                              {hoveredValue == null
+                                ? "尚未观测"
+                                : `${format(hoveredValue)} · ${(point.value ? (hoveredValue / point.value) * 100 : 0).toFixed(1)}%`}
+                            </span>
+                          </p>
+                        )}
+                        <p className="mt-2 flex justify-between gap-6 border-t pt-2">
+                          <span className="text-muted-foreground">{label}</span>
+                          <strong className="tabular-nums">
+                            {format(point.value)}
+                          </strong>
+                        </p>
+                      </CursorTooltip>
+                    )}
                   </>
                 )}
               </div>
             </div>
-            <div className="space-y-3 rounded-lg border p-3">
-              <p
-                id="history-keyboard-hint"
-                className="text-xs text-muted-foreground"
-              >
+            <div className="space-y-3 border-t border-border/60 pt-3">
+              <p id="history-keyboard-hint" className="sr-only">
                 拖动下方手柄缩放，拖动选中窗口平移；双击恢复。聚焦图表后用 ← →
                 查看快照，Home / End 跳到首尾，Escape 返回最新。
               </p>
@@ -574,14 +603,17 @@ export function HistoryChart({
                 </Button>
               </div>
             </div>
-            <div className="space-y-3">
-              <div className="flex flex-wrap items-center justify-between gap-2">
+            <details className="group border-t border-border/60 pt-3">
+              <summary className="cursor-pointer list-none text-xs text-muted-foreground [&::-webkit-details-marker]:hidden">
+                快照明细
+              </summary>
+              <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
                 <div>
                   <p className="text-sm font-medium">
                     {dateLabel(point.timestamp)} UTC{" "}
                     {pinned ? "· 已固定" : "· 快照明细"}
                   </p>
-                  <p className="text-xs text-muted-foreground">
+                  <p className="sr-only">
                     已知合计 {format(point.value)} {label} · 首次观测前保留未知
                   </p>
                 </div>
@@ -634,7 +666,7 @@ export function HistoryChart({
                   </tbody>
                 </table>
               </div>
-            </div>
+            </details>
           </>
         ) : (
           <div className="flex min-h-48 items-center justify-center rounded-lg border border-dashed text-sm text-muted-foreground">

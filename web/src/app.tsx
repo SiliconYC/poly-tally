@@ -10,7 +10,6 @@ import {
   Activity,
   AlertCircle,
   ArrowUpRight,
-  Braces,
   Code2,
   Files,
   GitFork,
@@ -24,7 +23,6 @@ import {
   ChevronDown,
   Info,
   CircleCheck,
-  Database,
 } from "lucide-react";
 import { ThemeProvider, useTheme } from "next-themes";
 import { toast } from "sonner";
@@ -43,7 +41,6 @@ import {
   historyWindow,
   initialFilters,
   metricOrder,
-  overviewChange,
   repositoryColors,
   warningsFor,
 } from "@/lib/dashboard";
@@ -91,14 +88,16 @@ const defaultLoad = () => loadStats();
 function Header({
   loading,
   onRefresh,
+  updatedAt,
 }: {
   loading: boolean;
   onRefresh: () => void;
+  updatedAt?: string;
 }) {
   const { resolvedTheme, setTheme } = useTheme();
   return (
-    <header className="border-b bg-background">
-      <div className="mx-auto flex h-16 max-w-[1600px] items-center justify-between gap-3 px-4 sm:px-8 lg:px-10">
+    <header className="border-b bg-card">
+      <div className="mx-auto flex h-[76px] max-w-[1536px] items-center justify-between gap-3 px-4 sm:px-8">
         <a
           href="#main"
           className="flex items-center gap-2.5 font-semibold tracking-tight"
@@ -106,11 +105,18 @@ function Header({
           <span className="flex size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
             <Layers2 className="size-4.5" />
           </span>
-          <span>Poly Tally</span>
+          <h1 className="text-xl font-semibold tracking-tight">
+            Poly Tally<span className="text-primary">.</span>
+          </h1>
           <span className="ml-3 hidden h-5 w-px bg-border sm:block" />
-          <span className="hidden text-sm font-normal text-muted-foreground sm:block">
-            代码统计
-          </span>
+          {updatedAt && (
+            <time
+              dateTime={updatedAt}
+              className="hidden text-xs font-normal text-muted-foreground sm:block"
+            >
+              {dateLabel(updatedAt)} UTC
+            </time>
+          )}
         </a>
         <div className="flex items-center gap-1.5">
           <Button
@@ -177,10 +183,6 @@ function Dashboard({ data }: { data: Dataset }) {
   );
   const warnings = useMemo(() => warningsFor(data, filters), [data, filters]);
   const publication = useMemo(() => publicationSummary(data), [data]);
-  const change = useMemo(
-    () => overviewChange(data, selected, filters),
-    [data, selected, filters.period, filters.metric, filters.language],
-  );
   const updateFilters = useCallback((patch: Partial<Filters>) => {
     setFilters((previous) => ({ ...previous, ...patch }));
     if ("period" in patch) setRange(null);
@@ -213,28 +215,7 @@ function Dashboard({ data }: { data: Dataset }) {
     "pending-rebuild": "私有指标等待重新采集",
   };
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
-        <div>
-          <div className="mb-2 flex items-center gap-2 text-xs text-muted-foreground">
-            <span>工作空间</span>
-            <span>/</span>
-            <span className="text-foreground">总览</span>
-          </div>
-          <h1 className="text-2xl font-semibold tracking-tight sm:text-[28px]">
-            代码资产概览
-          </h1>
-          <p className="mt-2 text-sm text-muted-foreground">
-            跨仓库的代码规模、语言构成与历史变化。
-          </p>
-        </div>
-        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          <span className="size-1.5 rounded-full bg-primary" />
-          <time dateTime={data.generatedAt}>
-            更新于 {dateLabel(data.generatedAt)} UTC
-          </time>
-        </div>
-      </div>
+    <div className="space-y-5">
       <DashboardFilters
         key={resetKey}
         data={data}
@@ -266,8 +247,8 @@ function Dashboard({ data }: { data: Dataset }) {
             <Card
               key={metric}
               className={cn(
-                "gap-0 py-0 shadow-none transition-colors",
-                active && "border-primary/50 bg-primary/[0.035]",
+                "gap-0 overflow-hidden rounded-xl py-0 shadow-none transition-colors",
+                active && "border-foreground bg-foreground text-background",
               )}
             >
               <button
@@ -277,63 +258,32 @@ function Dashboard({ data }: { data: Dataset }) {
                 onClick={() => updateFilters({ metric })}
               >
                 <div className="flex items-center justify-between gap-2">
-                  <span className="text-xs font-medium text-muted-foreground">
+                  <span
+                    className={cn(
+                      "text-xs font-medium",
+                      active ? "text-background/70" : "text-muted-foreground",
+                    )}
+                  >
                     {METRIC_LABELS[metric]}
                   </span>
                   <Icon
                     className={cn(
                       "size-4 text-muted-foreground/70",
-                      active && "text-primary",
+                      active && "text-background/60",
                     )}
                   />
                 </div>
                 <div
-                  className="mt-3 text-2xl font-semibold tracking-tight tabular-nums"
+                  className="mt-4 text-[27px] font-semibold tracking-[-0.045em] tabular-nums sm:text-[30px]"
                   data-testid={`metric-${metric}`}
                 >
                   {format(totals[metric])}
                 </div>
-                <p className="mt-2 text-[11px] text-muted-foreground">
-                  {metric === "total"
-                    ? "代码、注释、文档与空行"
-                    : metric === "files"
-                      ? "纳入统计的文本文件"
-                      : `${totals.total ? ((totals[metric] / totals.total) * 100).toFixed(1) : "0.0"}% 的总行数`}
-                </p>
               </button>
             </Card>
           );
         })}
       </section>
-      <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-muted-foreground">
-        <span className="flex items-center gap-1.5">
-          <Database className="size-3.5" />
-          {selected.length} 个已选仓库 · 最新已知快照
-        </span>
-        <span className="flex items-center gap-1.5">
-          <Activity className="size-3.5" />近{" "}
-          {filters.period === "all" ? "30" : filters.period} 天净变化{" "}
-          <strong
-            className={cn(
-              "font-medium",
-              change.change === null
-                ? "text-muted-foreground"
-                : change.change < 0
-                  ? "text-rose-600 dark:text-rose-400"
-                  : "text-primary",
-            )}
-          >
-            {change.change === null
-              ? "暂不可比"
-              : `${change.change > 0 ? "+" : ""}${format(change.change)}`}
-          </strong>
-          <span>
-            {change.missing
-              ? `· ${change.missing} 个仓库缺少期初快照`
-              : `· ${METRIC_LABELS[filters.metric]}`}
-          </span>
-        </span>
-      </div>
       <Suspense fallback={<Skeleton className="h-96" />}>
         <HistoryChart
           key={`history-${resetKey}`}
@@ -355,8 +305,6 @@ function Dashboard({ data }: { data: Dataset }) {
             metric={filters.metric}
             language={filters.language}
             colors={colors}
-            onLanguageChange={(language) => updateFilters({ language })}
-            onRepositorySelect={(id) => updateFilters({ ids: [id] })}
             onCopy={onCopy}
           />
         </Suspense>
@@ -367,15 +315,6 @@ function Dashboard({ data }: { data: Dataset }) {
             language={filters.language}
             since={window.since}
             until={window.until}
-            onRangeChange={(next) => {
-              setRange(next);
-              document.getElementById("history")?.scrollIntoView({
-                block: "start",
-                behavior: matchMedia("(prefers-reduced-motion: reduce)").matches
-                  ? "instant"
-                  : "smooth",
-              });
-            }}
           />
         </Suspense>
       </div>
@@ -386,119 +325,123 @@ function Dashboard({ data }: { data: Dataset }) {
         generatedAt={data.generatedAt}
         onCopy={onCopy}
       />
-      <div className="grid gap-6 lg:grid-cols-[1.25fr_1fr]">
-        <Card className="gap-4 shadow-none">
-          <CardHeader>
-            <div className="flex items-center justify-between">
-              <CardTitle className="flex items-center gap-2 text-sm">
-                <Activity className="size-4 text-muted-foreground" />
-                最近运行
-              </CardTitle>
+      <details className="group border-t pt-4">
+        <summary className="flex cursor-pointer list-none items-center gap-2 text-xs text-muted-foreground [&::-webkit-details-marker]:hidden">
+          <Info className="size-3.5" />
+          统计说明
+          <ChevronDown className="size-3.5 group-open:rotate-180" />
+        </summary>
+        <div className="space-y-6 pt-5">
+          <div className="grid gap-6 lg:grid-cols-[1.25fr_1fr]">
+            <Card className="gap-4 shadow-none">
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <CardTitle className="flex items-center gap-2 text-sm">
+                    <Activity className="size-4 text-muted-foreground" />
+                    最近运行
+                  </CardTitle>
+                  {run && (
+                    <Badge variant="outline" className="font-normal">
+                      {run.failed
+                        ? `${run.failed} 个失败`
+                        : run.completeness?.complete === false
+                          ? "采集未完整"
+                          : "采集完成"}
+                    </Badge>
+                  )}
+                </div>
+                <CardDescription>
+                  {run
+                    ? `${dateLabel(run.finishedAt)} UTC · 只读采集`
+                    : "暂无运行记录"}
+                </CardDescription>
+              </CardHeader>
               {run && (
-                <Badge variant="outline" className="font-normal">
-                  {run.failed
-                    ? `${run.failed} 个失败`
-                    : run.completeness?.complete === false
-                      ? "采集未完整"
-                      : "采集完成"}
-                </Badge>
-              )}
-            </div>
-            <CardDescription>
-              {run
-                ? `${dateLabel(run.finishedAt)} UTC · 只读采集`
-                : "暂无运行记录"}
-            </CardDescription>
-          </CardHeader>
-          {run && (
-            <CardContent>
-              <div className="grid grid-cols-3 gap-y-5 sm:grid-cols-6">
-                {[
-                  [format(run.repositories ?? 0), "公开仓库"],
-                  [
-                    `${Number(run.durationSeconds ?? 0).toFixed(1)}s`,
-                    "运行耗时",
-                  ],
-                  [format(run.cacheHits ?? 0), "缓存命中"],
-                  [format(run.parsedBlobs ?? 0), "解析对象"],
-                  [format(run.objectReads ?? 0), "对象读取"],
-                  [format(run.recomputedCommits ?? 0), "重算提交"],
-                ].map(([value, label]) => (
-                  <div key={label}>
-                    <p className="font-semibold tabular-nums">{value}</p>
-                    <p className="mt-1 text-[11px] text-muted-foreground">
-                      {label}
-                    </p>
+                <CardContent>
+                  <div className="grid grid-cols-3 gap-y-5 sm:grid-cols-6">
+                    {[
+                      [format(run.repositories ?? 0), "公开仓库"],
+                      [
+                        `${Number(run.durationSeconds ?? 0).toFixed(1)}s`,
+                        "运行耗时",
+                      ],
+                      [format(run.cacheHits ?? 0), "缓存命中"],
+                      [format(run.parsedBlobs ?? 0), "解析对象"],
+                      [format(run.objectReads ?? 0), "对象读取"],
+                      [format(run.recomputedCommits ?? 0), "重算提交"],
+                    ].map(([value, label]) => (
+                      <div key={label}>
+                        <p className="font-semibold tabular-nums">{value}</p>
+                        <p className="mt-1 text-[11px] text-muted-foreground">
+                          {label}
+                        </p>
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
-            </CardContent>
-          )}
-        </Card>
-        <Card className="gap-4 shadow-none">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-sm">
-              <CircleCheck className="size-4 text-muted-foreground" />
-              发布状态
-            </CardTitle>
-            <CardDescription>
-              已发布 {publication.publicRepositories} 个公开仓库 +{" "}
-              {publication.privateRepositories} 个私有仓库
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-2 text-xs text-muted-foreground">
-            <p>
-              {privateStatus[publication.privateStatus] ?? "私有采集状态未知"}
-              {publication.privateSource
-                ? ` · ${{ local: "本地采集", "github-actions": "GitHub Actions" }[publication.privateSource] ?? publication.privateSource}`
-                : ""}
-            </p>
-            <p>
-              私有最后成功：{dateLabel(publication.privateUpdatedAt)}
-              {publication.privateUpdatedAt ? " UTC" : ""}
-            </p>
-          </CardContent>
-        </Card>
-      </div>
-      <Card className="gap-0 py-0 shadow-none">
-        <details className="group">
-          <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-6 py-4 text-sm font-medium [&::-webkit-details-marker]:hidden">
-            <span className="flex items-center gap-2">
-              <Info className="size-4 text-muted-foreground" />
-              统计口径与数据说明
-            </span>
-            <ChevronDown className="size-4 text-muted-foreground transition-transform group-open:rotate-180" />
-          </summary>
-          <div className="space-y-3 border-t px-6 py-5 text-xs leading-relaxed text-muted-foreground">
-            <p>
-              总行数 = 代码行 + 注释行 + 文档行 +
-              空行。混合代码与注释的物理行只计为代码行，文件数单独统计。
-            </p>
-            <p>
-              概览、构成与仓库表显示最新已知快照；时间筛选控制历史和变化比较。首次观测前保持未知，此后的存量延续到下一次快照，保留真实下降和同刻变化。
-            </p>
-            <p>
-              净变化只比较有期初快照的仓库。首次观测的存量不计入净变化；缺失期初、部分周期与不完整历史会明确标记。私有仓库仅发布脱敏后的按日规模，不公开源码、路径与提交细节。同源组由采集器折叠为单个统计对象。
-            </p>
-            <p>
-              规则 {data.rules.version} ·{" "}
-              {data.rules.description ?? "所有纳入仓库采用相同统计规则。"}
-              {data.publication?.privateStatus === "retained"
-                ? ` · 私有旧快照规则 ${data.publication.privateRulesVersion ?? "未知"}`
-                : ""}
-            </p>
+                </CardContent>
+              )}
+            </Card>
+            <Card className="gap-4 shadow-none">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-sm">
+                  <CircleCheck className="size-4 text-muted-foreground" />
+                  发布状态
+                </CardTitle>
+                <CardDescription>
+                  已发布 {publication.publicRepositories} 个公开仓库 +{" "}
+                  {publication.privateRepositories} 个私有仓库
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-2 text-xs text-muted-foreground">
+                <p>
+                  {privateStatus[publication.privateStatus] ??
+                    "私有采集状态未知"}
+                  {publication.privateSource
+                    ? ` · ${{ local: "本地采集", "github-actions": "GitHub Actions" }[publication.privateSource] ?? publication.privateSource}`
+                    : ""}
+                </p>
+                <p>
+                  私有最后成功：{dateLabel(publication.privateUpdatedAt)}
+                  {publication.privateUpdatedAt ? " UTC" : ""}
+                </p>
+              </CardContent>
+            </Card>
           </div>
-        </details>
-      </Card>
-      <footer className="flex flex-col justify-between gap-2 pb-3 text-[11px] text-muted-foreground sm:flex-row">
-        <span className="flex items-center gap-1.5">
-          <Braces className="size-3.5" />
-          Poly Tally · 跨仓库代码统计
-        </span>
-        <span>
-          采集器 {data.collector?.version ?? "—"} · 规则 {data.rules.version}
-        </span>
-      </footer>
+          <Card className="gap-0 py-0 shadow-none">
+            <details className="group">
+              <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-6 py-4 text-sm font-medium [&::-webkit-details-marker]:hidden">
+                <span className="flex items-center gap-2">
+                  <Info className="size-4 text-muted-foreground" />
+                  统计口径与数据说明
+                </span>
+                <ChevronDown className="size-4 text-muted-foreground transition-transform group-open:rotate-180" />
+              </summary>
+              <div className="space-y-3 border-t px-6 py-5 text-xs leading-relaxed text-muted-foreground">
+                <p>
+                  总行数 = 代码行 + 注释行 + 文档行 +
+                  空行。混合代码与注释的物理行只计为代码行，文件数单独统计。
+                </p>
+                <p>
+                  概览、构成与仓库表显示最新已知快照；时间筛选控制历史和变化比较。首次观测前保持未知，此后的存量延续到下一次快照，保留真实下降和同刻变化。
+                </p>
+                <p>
+                  净变化只比较有期初快照的仓库。首次观测的存量不计入净变化；缺失期初、部分周期与不完整历史会明确标记。私有仓库仅发布脱敏后的按日规模，不公开源码、路径与提交细节。同源组由采集器折叠为单个统计对象。
+                </p>
+                <p>
+                  规则 {data.rules.version} ·{" "}
+                  {data.rules.description ?? "所有纳入仓库采用相同统计规则。"}
+                  {data.publication?.privateStatus === "retained"
+                    ? ` · 私有旧快照规则 ${data.publication.privateRulesVersion ?? "未知"}`
+                    : ""}
+                </p>
+              </div>
+            </details>
+          </Card>
+          <p className="text-xs text-muted-foreground">
+            采集器 {data.collector?.version ?? "—"} · 规则 {data.rules.version}
+          </p>
+        </div>
+      </details>
     </div>
   );
 }
@@ -543,11 +486,12 @@ function Application({
       </a>
       <Header
         loading={loading}
+        updatedAt={data?.generatedAt}
         onRefresh={() => setRevision((value) => value + 1)}
       />
       <main
         id="main"
-        className="mx-auto max-w-[1600px] px-4 py-6 sm:px-8 sm:py-8 lg:px-10"
+        className="mx-auto max-w-[1536px] px-4 py-5 sm:px-8 sm:py-7"
       >
         {loading ? (
           <div

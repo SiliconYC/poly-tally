@@ -4,7 +4,6 @@ import {
   repositoryOptions,
   repositoryDisplayName,
   repositoryVisibility,
-  METRIC_LABELS,
 } from "../../model.mjs";
 import type { Dataset, Filters } from "@/lib/types";
 import { Button } from "@/components/ui/button";
@@ -19,7 +18,6 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { SelectControl } from "./select-control";
-import { metricOrder } from "@/lib/dashboard";
 
 export function DashboardFilters({
   data,
@@ -192,14 +190,7 @@ export function DashboardFilters({
             ...languages.map((name) => [name, name] as const),
           ]}
         />
-        <SelectControl
-          label="统计指标"
-          value={filters.metric}
-          onChange={(metric) =>
-            onChange({ metric: metric as Filters["metric"] })
-          }
-          options={metricOrder.map((key) => [key, METRIC_LABELS[key]])}
-        />
+
         <SelectControl
           label="时间范围"
           value={filters.period}

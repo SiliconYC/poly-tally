@@ -18,6 +18,7 @@
     "format": "prettier --write web/src vite.config.ts tsconfig.json playwright.config.ts tests/browser scripts/bench-dashboard.ts components.json package.json"
   },
   "dependencies": {
+    "@floating-ui/react-dom": "^2.1.9",
     "@tailwindcss/vite": "^4.3.3",
     "@tanstack/react-table": "^8.21.3",
     "class-variance-authority": "^0.7.1",
