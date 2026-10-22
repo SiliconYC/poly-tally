@@ -34,19 +34,30 @@ export const metricOrder = [
   "files",
 ] as const;
 const palette = [
-  "#5c8061",
-  "#9fac7b",
-  "#52755d",
-  "#c8ab68",
-  "#a58b93",
-  "#899082",
-  "#6f9193",
-  "#a8b38b",
-  "#b38162",
-  "#9a8aab",
-  "#729b83",
-  "#bc9b60",
-  "#65816c",
+  "#2563eb",
+  "#ea580c",
+  "#16a34a",
+  "#9333ea",
+  "#e11d48",
+  "#0891b2",
+  "#ca8a04",
+  "#db2777",
+  "#475569",
+  "#0d9488",
+  "#7c3aed",
+  "#b45309",
+  "#3b82f6",
+  "#f97316",
+  "#22c55e",
+  "#a855f7",
+  "#f43f5e",
+  "#06b6d4",
+  "#eab308",
+  "#ec4899",
+  "#64748b",
+  "#14b8a6",
+  "#8b5cf6",
+  "#d97706",
 ];
 export const repositoryColors = (repositories: Repository[]) =>
   new Map(
@@ -54,7 +65,7 @@ export const repositoryColors = (repositories: Repository[]) =>
       .sort((a, b) => a.id.localeCompare(b.id))
       .map((repository, index) => [
         repository.id,
-        palette[index] ?? `hsl(${(index * 137.508) % 360} 22% 52%)`,
+        palette[index] ?? `hsl(${(index * 137.508) % 360} 65% 50%)`,
       ]),
   );
 export const initialFilters = (data: Dataset): Filters => ({

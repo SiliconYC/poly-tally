@@ -33,27 +33,33 @@ type Props = {
 };
 type Item = { id: string; name: string; value: number; color: string };
 const palette = [
-  "#5c8061",
-  "#9fac7b",
-  "#a58b93",
-  "#c8ab68",
-  "#6f9193",
-  "#899082",
-  "#7a899b",
+  "#2563eb",
+  "#ea580c",
+  "#16a34a",
+  "#9333ea",
+  "#e11d48",
+  "#0891b2",
+  "#ca8a04",
+  "#db2777",
+  "#475569",
+  "#0d9488",
+  "#7c3aed",
+  "#b45309",
 ];
 const languageColors: Record<string, string> = {
-  Python: "#5c8061",
-  C: "#9fac7b",
-  "C++": "#7a899b",
-  "C#": "#a58b93",
-  TypeScript: "#9fac7b",
-  JavaScript: "#c8ab68",
-  TSX: "#a58b93",
-  Go: "#6f9193",
-  Rust: "#b38162",
-  Markdown: "#899082",
-  HTML: "#c49472",
-  CSS: "#9a8aab",
+  Python: "#d97706",
+  C: "#16a34a",
+  "C++": "#7c3aed",
+  "C#": "#15803d",
+  TypeScript: "#2563eb",
+  JavaScript: "#ca8a04",
+  TSX: "#9333ea",
+  Go: "#0891b2",
+  Rust: "#b91c1c",
+  Markdown: "#475569",
+  HTML: "#ea580c",
+  CSS: "#db2777",
+  QML: "#0d9488",
 };
 function languageColor(name: string) {
   let hash = 0;
@@ -83,7 +89,7 @@ export function CompositionChart({
             }[]
           ).map((item) => ({
             ...item,
-            color: colors.get(item.id) ?? "#5c8061",
+            color: colors.get(item.id) ?? "var(--chart-1)",
           }))
         : (
             languageTotals(repositories, metric) as {

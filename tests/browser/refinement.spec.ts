@@ -1,5 +1,50 @@
 import { test, expect, type Page } from "@playwright/test";
 import { fixture, repository } from "../../web/src/lib/fixtures";
+function contrastRatio(element: Element) {
+  const context = document.createElement("canvas").getContext("2d")!;
+  const channels = (color: string) => {
+    context.clearRect(0, 0, 1, 1);
+    context.fillStyle = color;
+    context.fillRect(0, 0, 1, 1);
+    const [red, green, blue, alpha] = context.getImageData(0, 0, 1, 1).data;
+    return [red, green, blue, alpha / 255];
+  };
+  const blend = (front: number[], back: number[]) => {
+    const alpha = front[3] ?? 1;
+    return front
+      .slice(0, 3)
+      .map((value, index) => value * alpha + back[index] * (1 - alpha));
+  };
+  const luminance = (color: number[]) => {
+    const linear = color.map((value) => {
+      const channel = value / 255;
+      return channel <= 0.04045
+        ? channel / 12.92
+        : ((channel + 0.055) / 1.055) ** 2.4;
+    });
+    return linear[0] * 0.2126 + linear[1] * 0.7152 + linear[2] * 0.0722;
+  };
+  const ancestors: Element[] = [];
+  for (
+    let parent: Element | null = element;
+    parent;
+    parent = parent.parentElement
+  )
+    ancestors.push(parent);
+  let background = [255, 255, 255];
+  for (const parent of ancestors.reverse())
+    background = blend(
+      channels(getComputedStyle(parent).backgroundColor),
+      background,
+    );
+  const style = getComputedStyle(element);
+  const foreground = blend(
+    channels(element instanceof SVGElement ? style.fill : style.color),
+    background,
+  );
+  const values = [luminance(foreground), luminance(background)];
+  return (Math.max(...values) + 0.05) / (Math.min(...values) + 0.05);
+}
 async function open(page: Page, data = fixture()) {
   await page.route("**/data/stats.json", (route) =>
     route.fulfill({ json: data }),
@@ -92,38 +137,35 @@ test("chart axes remain legible in both themes", async ({ page }) => {
       const contrast = await page
         .locator(`${selector} text[orientation="bottom"]`)
         .first()
-        .evaluate((element) => {
-          function luminance(color: string) {
-            const channels = color
-              .match(/[\d.]+/g)!
-              .slice(0, 3)
-              .map(Number)
-              .map((value) => {
-                const channel = value / 255;
-                return channel <= 0.04045
-                  ? channel / 12.92
-                  : ((channel + 0.055) / 1.055) ** 2.4;
-              });
-            return (
-              channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722
-            );
-          }
-          let parent: Element | null = element;
-          let background = "rgba(0, 0, 0, 0)";
-          while (parent && background === "rgba(0, 0, 0, 0)") {
-            background = getComputedStyle(parent).backgroundColor;
-            parent = parent.parentElement;
-          }
-          const values = [
-            luminance(getComputedStyle(element).fill),
-            luminance(background),
-          ];
-          return (Math.max(...values) + 0.05) / (Math.min(...values) + 0.05);
-        });
+        .evaluate(contrastRatio);
       expect(
         contrast,
         `${theme} ${selector} axis contrast`,
       ).toBeGreaterThanOrEqual(4.5);
+    }
+  }
+});
+test("dashboard reading text has strong contrast in both themes", async ({
+  page,
+}) => {
+  await open(page);
+  for (const theme of ["light", "dark"]) {
+    if (theme === "dark")
+      await page.getByRole("button", { name: "切换深色模式" }).click();
+    for (const selector of [
+      ".header-date",
+      "[data-slot=tabs-trigger]",
+      ".metric-label",
+      ".metric-value",
+      "#repositories [data-slot=card-title]",
+      "#repositories [data-slot=table-head]",
+    ]) {
+      for (const element of await page.locator(selector).all()) {
+        expect(
+          await element.evaluate(contrastRatio),
+          `${theme} ${selector} contrast`,
+        ).toBeGreaterThanOrEqual(7);
+      }
     }
   }
 });
