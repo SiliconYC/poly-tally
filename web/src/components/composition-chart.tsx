@@ -36,7 +36,7 @@ const languageColors: Record<string, string> = {
   Python: "#9c8971",
   C: "#83917b",
   "C++": "#8a87a1",
-  "C#": "#758f86",
+  "C#": "#7a8062",
   TypeScript: "#647f8d",
   JavaScript: "#a39a75",
   TSX: "#94859d",
