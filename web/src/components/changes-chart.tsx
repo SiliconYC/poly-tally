@@ -110,7 +110,7 @@ export function ChangesChart({ repositories, language, since, until }: Props) {
         {periods.length ? (
           <ChartContainer
             config={config}
-            className="h-[280px] w-full aspect-auto"
+            className="changes-plot w-full aspect-auto"
           >
             <BarChart
               data={periods}
