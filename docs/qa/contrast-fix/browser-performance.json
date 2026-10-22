@@ -9,17 +9,17 @@
       "name": "distinct",
       "repositories": 20,
       "snapshots": 10000,
-      "renderMs": 3569,
-      "percentMs": 2113,
-      "keyboardMs": 112
+      "renderMs": 4679,
+      "percentMs": 2049,
+      "keyboardMs": 98
     },
     {
       "name": "repeated",
       "repositories": 40,
       "snapshots": 100000,
-      "renderMs": 3401,
-      "percentMs": 734,
-      "keyboardMs": 110
+      "renderMs": 2235,
+      "percentMs": 466,
+      "keyboardMs": 88
     }
   ]
 }
