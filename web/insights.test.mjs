@@ -73,3 +73,71 @@ test('period windows respect limit, partial starts, invalid input and month comp
   assert.deepEqual(insights.periodChanges?.(repositories, {...options, limit: 0}), []);
   assert.deepEqual(insights.periodChanges?.(repositories, {...options, since: '2027-01-01'}), []);
 });
+
+test('daily, weekly and monthly deltas reconcile across repositories discovered during October', () => {
+  const repos = [
+    repo('owner/old', [
+      snap('2026-09-30T23:59:59Z', 200),
+      snap('2026-10-15T14:00:00Z', 210),
+      snap('2026-10-19T20:00:00Z', 205),
+    ]),
+    repo('owner/new', [
+      snap('2026-10-15T11:00:00Z', 10000),
+      snap('2026-10-15T15:00:00Z', 10050),
+      snap('2026-10-20T12:00:00Z', 10080),
+      snap('2026-10-21T09:00:00Z', 10060),
+    ]),
+  ];
+  const options = {since: '2026-10-01T00:00:00Z', until: '2026-10-23T00:00:00Z'};
+  const daily = insights.periodChanges(repos, {...options, period: 'day', limit: 31});
+  const weekly = insights.periodChanges(repos, {...options, period: 'week', limit: 10});
+  const monthly = insights.monthlyChanges(repos, options);
+  const sum = rows => rows.reduce((total, row) => total + (row.change ?? 0), 0);
+  assert.equal(sum(daily), 65);
+  assert.equal(sum(weekly), 65);
+  assert.equal(sum(monthly), 65);
+  assert.equal(monthly[0].change, 65);
+  assert.deepEqual(['2026-10-15', '2026-10-19', '2026-10-20', '2026-10-21'].map(day =>
+    daily.find(row => row.key === day).change), [60, -5, 30, -20]);
+});
+
+test('new repository first inventory is unknown but same-day later changes are counted', () => {
+  const options = {since: '2026-10-01T00:00:00Z', until: '2026-10-23T00:00:00Z'};
+  const repositories = [repo('owner/new', [
+    snap('2026-10-21T10:00:00Z', 10000), snap('2026-10-21T10:05:00Z', 10010),
+  ])];
+  const daily = insights.periodChanges(repositories, {...options, period: 'day', limit: 31});
+  const monthly = insights.monthlyChanges(repositories, options);
+  assert.equal(daily.find(row => row.key === '2026-10-21').change, 10);
+  assert.equal(monthly[0].change, 10);
+  assert.equal(monthly[0].compared, 1);
+  assert.equal(monthly[0].missing, 0);
+  assert.equal(insights.monthlyChanges([repo('owner/first', [
+    snap('2026-10-21T10:00:00Z', 10000),
+  ])], options)[0].change, null);
+});
+
+test('display cutoff recovers exact boundary delta without duplicating carried baseline', () => {
+  const repositories = [repo('owner/projected', [
+    snap('2026-10-01T00:00:00Z', 115),
+    snap('2026-10-01T12:00:00Z', 120),
+  ])];
+  repositories[0].displayBaseline = snap('2026-09-30T23:59:59Z', 100);
+  const options = {since: '2026-10-01T00:00:00Z', until: '2026-10-01T23:59:59.999Z'};
+  assert.equal(insights.periodChanges(repositories, {...options, period: 'day'})[0].change, 20);
+  assert.equal(insights.monthlyChanges(repositories, options)[0].change, 20);
+  repositories[0].history.unshift({...snap('2026-10-01T00:00:00Z', 100), displayBoundary: true});
+  assert.equal(insights.monthlyChanges(repositories, options)[0].change, 20);
+});
+
+test('selected language and negative changes reconcile when first observations are later', () => {
+  const before = snap('2026-10-17T00:00:00Z', 300);
+  const after = snap('2026-10-19T00:00:00Z', 200);
+  const repoOne = repo('owner/a', [before, after]);
+  const options = {since: '2026-10-01T00:00:00Z', until: '2026-10-31T23:59:59Z', language: 'Python'};
+  for (const period of ['day', 'week', 'month']) {
+    const rows = insights.periodChanges([repoOne], {...options, period, limit: 40});
+    assert.equal(rows.reduce((sum, row) => sum + (row.change ?? 0), 0), -100);
+  }
+  assert.equal(insights.monthlyChanges([repoOne], {...options, language: 'Rust'})[0].change, 0);
+});
