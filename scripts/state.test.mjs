@@ -193,6 +193,24 @@ test('durable private publication rejects unproved lineage scans even if visible
   await assert.rejects(run(t, 'save-private', candidate, null, {'checkpoint.json': checkpoint}, {noPrivate:true}), /incomplete/i);
 });
 
+test('explicit rebuilt snapshot preserves scope and restores separately from fresh metrics', async t => {
+  const proof = {complete:false,discoveryComplete:false,expectedRepositories:1,scannedRepositories:1,missingMembers:0,failed:0};
+  const key = 'abcdef0123456789';
+  const row = {id:`private-${key}`,sourceKey:key,name:'owner/private',visibility:'private',snapshotKind:'daily',url:null,branch:null,head:null,status:'active',lastSuccessAt:envelope.generatedAt,rulesVersion:envelope.rulesVersion,historyComplete:true,notice:'私有仓库：仅公开按日规模，不公开源码与提交详情。',skippedFiles:0,history:[{timestamp:envelope.generatedAt,metrics:{code:10,comment:0,blank:0,documentation:0,files:1},languages:{}}]};
+  const rebuilt = {...currentPrivate,lineageVersion:'abcdef0123456789',completeness:proof,collection:{repositories:1,failed:0},repositories:[row]};
+  const old = {...rebuilt,datasetEpoch:'old-v1',completeness:{...proof,complete:true,discoveryComplete:true}};
+  const publicCheckpoint = {...currentCheckpoint,lineageVersion:rebuilt.lineageVersion};
+  const saved = await run(t,'save-rebuilt-private',rebuilt,null,{'checkpoint.json':publicCheckpoint,'private-metrics.json':old},{env:epochEnv,noPrivate:true});
+  const tree = saved.requests.find(request=>request.path==='/git/trees'&&request.method==='POST').body;
+  assert.deepEqual(tree.tree.map(entry=>entry.path),['rebuilt-private-metrics.json']);
+  const restored = await run(t,'restore',null,null,{'checkpoint.json':publicCheckpoint,'private-metrics.json':old,'rebuilt-private-metrics.json':rebuilt},{env:epochEnv});
+  assert.equal(restored.outcome.privatePending,false);
+  assert.deepEqual(JSON.parse(await readFile(join(restored.privateFilename,'../rebuilt-private-metrics.json'))),rebuilt);
+  await assert.rejects(readFile(restored.privateFilename),{code:'ENOENT'});
+  const shrunk = {...rebuilt,collection:{repositories:0,failed:0},repositories:[]};
+  await assert.rejects(run(t,'save-rebuilt-private',shrunk,null,{'checkpoint.json':publicCheckpoint,'private-metrics.json':old},{env:epochEnv,noPrivate:true}), /scope|rebuilt/i);
+});
+
 test('workflow and collector share the explicit lineage rebuild epoch', async () => {
   const workflow = await readFile(new URL('../.github/workflows/pages.yml', import.meta.url), 'utf8');
   const config = JSON.parse(await readFile(new URL('../config.json', import.meta.url), 'utf8'));

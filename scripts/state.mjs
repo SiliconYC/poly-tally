@@ -3,7 +3,7 @@ import {execFileSync} from 'node:child_process';
 import {appendFile, mkdir, readFile, writeFile, rm} from 'node:fs/promises';
 import {dirname} from 'node:path';
 import {pathToFileURL} from 'node:url';
-import {validatePrivateMetrics, validatePrivateMetricsReplacement, validateCompletePrivateMetrics, validatePrivateSnapshotBlob} from './metrics.mjs';
+import {validatePrivateMetrics, validatePrivateMetricsReplacement, validateCompletePrivateMetrics, validateRebuiltPrivateMetrics, validatePrivateSnapshotBlob} from './metrics.mjs';
 
 function privateData(bytes, complete = false) {
   let data;
@@ -49,11 +49,16 @@ export async function runState(command, filename, privateFilename, {env = proces
   if (externalSha && (!/^[a-f0-9]{40}$/.test(externalSha) || !epoch || !privateFilename)) throw new Error('External private snapshot requires a valid blob SHA, dataset epoch and destination.');
   const repository = env.GITHUB_REPOSITORY;
   if (!repository || !/^[\w.-]+\/[\w.-]+$/.test(repository)) throw new Error('GITHUB_REPOSITORY is required');
-  if (!['restore', 'save', 'save-private'].includes(command) || !filename || (command === 'save-private' && privateFilename)) throw new Error('Usage: state.mjs restore|save checkpoint [sanitized-private-file] | save-private sanitized-private-file');
+  if (!['restore', 'save', 'save-private', 'save-rebuilt-private'].includes(command) || !filename || (['save-private', 'save-rebuilt-private'].includes(command) && privateFilename)) throw new Error('Usage: state.mjs restore|save checkpoint [sanitized-private-file] | save-private|save-rebuilt-private sanitized-private-file');
   const token = env.GH_TOKEN || (gitCredential ? credentialReader(repository, env) : undefined);
   if (command !== 'restore' && !token) throw new Error('GH_TOKEN or explicit --git-credential is required to save durable state');
   const files = [];
-  if (command === 'save-private') {
+  if (command === 'save-rebuilt-private') {
+    const bytes = await readFile(filename);
+    const data = privateData(bytes);
+    validateRebuiltPrivateMetrics(data);
+    files.push({path:'rebuilt-private-metrics.json', bytes, data});
+  } else if (command === 'save-private') {
     const bytes = await readFile(filename);
     files.push({path: 'private-metrics.json', bytes, data: privateData(bytes, true)});
   } else if (command === 'save') {
@@ -88,6 +93,7 @@ export async function runState(command, filename, privateFilename, {env = proces
     if (externalSha && !metrics) throw new Error('Selected external private snapshot is missing from durable state.');
     if (ref && !checkpoint && !metrics) throw new Error('Durable state branch has no checkpoint; refusing to lose collected history');
     const restore = [];
+    const rebuiltFilename = privateFilename ? `${dirname(privateFilename)}/rebuilt-private-metrics.json` : undefined;
     let publicCurrent = false;
     let privateCurrent = false;
     if (checkpoint) {
@@ -109,18 +115,30 @@ export async function runState(command, filename, privateFilename, {env = proces
         privateCurrent = true;
       }
     }
+    const rebuiltEntry = entryFor('rebuilt-private-metrics.json');
+    let rebuiltCurrent = false;
+    if (!privateCurrent && rebuiltEntry && rebuiltFilename) {
+      const bytes = await readBlob(rebuiltEntry);
+      const data = privateData(bytes);
+      validateRebuiltPrivateMetrics(data);
+      if (data.datasetEpoch === epoch && publicCurrent) {
+        restore.push({filename:rebuiltFilename, bytes});
+        rebuiltCurrent = true;
+      }
+    }
     // Remove only local generated inputs, never the durable branch or Git history.
     // A bundled/cache snapshot cannot impersonate the newly requested baseline.
     if (epoch) {
       if (!publicCurrent) await rm(filename, {force: true});
       if (!privateCurrent && privateFilename) await rm(privateFilename, {force: true});
+      if (!rebuiltCurrent && rebuiltFilename) await rm(rebuiltFilename, {force:true});
     }
     for (const item of restore) {
       await mkdir(dirname(item.filename), {recursive: true});
       await writeFile(item.filename, item.bytes);
     }
     logger.log(epoch && !publicCurrent ? 'New dataset epoch: public rebuild required; prior snapshots are excluded.' : 'Restored available durable public checkpoint and sanitized private metrics.');
-    return {resetRequired: Boolean(epoch && !publicCurrent), privatePending: Boolean(epoch && !privateCurrent)};
+    return {resetRequired: Boolean(epoch && !publicCurrent), privatePending: Boolean(epoch && !privateCurrent && !rebuiltCurrent)};
   }
   let checkpoint = files.find(item => item.path === 'checkpoint.json')?.data;
   const checkpointEntry = entryFor('checkpoint.json');
@@ -129,6 +147,15 @@ export async function runState(command, filename, privateFilename, {env = proces
   if (epoch) {
     if (checkpoint?.datasetEpoch !== epoch) throw new Error('Current public dataset epoch is required before private publication.');
     if (previousCheckpoint?.datasetEpoch !== epoch && (checkpoint.collection?.failed !== 0 || (checkpoint.lineageVersion && checkpoint.collection?.completeness?.complete !== true))) throw new Error('A complete public rebuild is required to initialize the new dataset epoch.');
+  }
+  const rebuiltFile = files.find(file => file.path === 'rebuilt-private-metrics.json');
+  if (rebuiltFile) {
+    const baselineEntries = [entryFor('private-metrics.json'), entryFor('rebuilt-private-metrics.json')].filter(Boolean);
+    if (!baselineEntries.length) throw new Error('Offline rebuilt publication requires an existing private scope baseline.');
+    for (const entry of baselineEntries) {
+      const previous = privateData(await readBlob(entry));
+      validatePrivateMetricsReplacement(previous, rebuiltFile.data, {rules:{version:rebuiltFile.data.rulesVersion}, lineageVersion:checkpoint.lineageVersion, repositories:checkpoint.repositories}, {resetEpoch:epoch, preserveScope:true, allowRebuilt:true});
+    }
   }
   const changed = [];
   let privateBlobSha;
@@ -140,7 +167,9 @@ export async function runState(command, filename, privateFilename, {env = proces
     if (entry && file.path === 'private-metrics.json') {
       const previous = privateData(await readBlob(entry), true);
       const publicStats = checkpoint ? {rules: {version: file.data.rulesVersion}, lineageVersion: checkpoint.lineageVersion, repositories: checkpoint.repositories} : undefined;
-      validatePrivateMetricsReplacement(previous, file.data, publicStats, {resetEpoch: epoch});
+      validatePrivateMetricsReplacement(previous, file.data, publicStats, {resetEpoch: epoch, preserveScope:true});
+      const rebuiltEntry = entryFor('rebuilt-private-metrics.json');
+      if (rebuiltEntry) validatePrivateMetricsReplacement(privateData(await readBlob(rebuiltEntry)), file.data, publicStats, {resetEpoch:epoch, preserveScope:true});
       // 采集时刻变化不产生数据提交；发布页面仍使用本次实际收到的快照时间。
       if (privateFingerprint(previous) === privateFingerprint(file.data)) continue;
     }
@@ -157,7 +186,7 @@ export async function runState(command, filename, privateFilename, {env = proces
     entries.push({path: file.path, mode: '100644', type: 'blob', sha: blob.sha});
   }
   const nextTree = await api('/git/trees', 'POST', {...(commit ? {base_tree: commit.tree.sha} : {}), tree: entries});
-  const nextCommit = await api('/git/commits', 'POST', {message: command === 'save-private' ? 'data: update sanitized private repository metrics' : 'data: update repository metrics state', tree: nextTree.sha, parents: ref ? [ref.object.sha] : []});
+  const nextCommit = await api('/git/commits', 'POST', {message: ['save-private', 'save-rebuilt-private'].includes(command) ? 'data: update sanitized private repository metrics' : 'data: update repository metrics state', tree: nextTree.sha, parents: ref ? [ref.object.sha] : []});
   if (ref) await api('/git/refs/heads/tally-state', 'PATCH', {sha: nextCommit.sha, force: false});
   else await api('/git/refs', 'POST', {ref: 'refs/heads/tally-state', sha: nextCommit.sha});
   logger.log('Saved durable public checkpoint and/or sanitized private metrics.');

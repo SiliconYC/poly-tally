@@ -111,6 +111,13 @@ export function validateCompletePrivateMetrics(envelope) {
   return true;
 }
 
+export function validateRebuiltPrivateMetrics(envelope) {
+  validatePrivateMetrics(envelope);
+  const proof = envelope.completeness;
+  if (!envelope.datasetEpoch || !hexKey(envelope.lineageVersion) || !proof || proof.complete !== false || proof.discoveryComplete !== false || proof.expectedRepositories < 1 || proof.expectedRepositories !== proof.scannedRepositories || proof.missingMembers !== 0 || proof.failed !== 0 || envelope.collection.failed !== 0 || envelope.repositories.length === 0 || envelope.repositories.some(repository => !repository.historyComplete || repository.rulesVersion !== envelope.rulesVersion || !['active', 'empty'].includes(repository.status) || (repository.status === 'active' && repository.history.length === 0))) throw new Error('Invalid offline rebuilt private snapshot; preserve the existing display.');
+  return true;
+}
+
 // An external collection is selected explicitly by its sanitized Git blob, not
 // by scan time or by the presence of a previously successful durable snapshot.
 export function validatePrivateSnapshotBlob(bytes, expectedBlobSha) {
@@ -225,10 +232,11 @@ export function mergePrivateMetrics(publicStats, envelope, {retainedBaseline, pr
   return data;
 }
 
-export function validatePrivateMetricsReplacement(previous, next, publicStats, {resetEpoch, preserveScope = false} = {}) {
+export function validatePrivateMetricsReplacement(previous, next, publicStats, {resetEpoch, preserveScope = false, allowRebuilt = false} = {}) {
   validatePrivateMetrics(previous);
   validatePrivateMetrics(next);
-  requireComplete(next);
+  if (allowRebuilt) validateRebuiltPrivateMetrics(next);
+  else requireComplete(next);
   if (publicStats) matchingLineage(publicStats, next);
   if (previous.lineageVersion !== next.lineageVersion && previous.datasetEpoch === next.datasetEpoch) throw new Error('Lineage configuration changed; a new dataset epoch is required.');
   if (previous.datasetEpoch !== next.datasetEpoch) {

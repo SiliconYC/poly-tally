@@ -47,6 +47,34 @@ test('site retains public-only mode when no private snapshot is configured', asy
   assert.deepEqual(JSON.parse(await readFile(join(root, 'site/data/stats.json'))), publicStats);
 });
 
+test('required private publication cannot replace the site with public repositories alone', async t => {
+  const root = await fixture(t);
+  await mkdir(join(root, 'site'));
+  await writeFile(join(root, 'site/index.html'), 'previous-private-site');
+  await assert.rejects(buildSite({root, requirePrivate: true, logger: {log() {}}}), /private.*required/i);
+  assert.equal(await readFile(join(root, 'site/index.html'), 'utf8'), 'previous-private-site');
+});
+
+test('offline rebuilt private history stays visible with its original observation time', async t => {
+  const proof = {complete:false, discoveryComplete:false, expectedRepositories:1, scannedRepositories:1, missingMembers:0, failed:0};
+  const sourceKey = '0123456789abcdef';
+  const row = {id:`private-${sourceKey}`, sourceKey, name:'owner/private', visibility:'private', snapshotKind:'daily', url:null, branch:null, head:null, status:'active', lastSuccessAt:envelope.generatedAt, rulesVersion:envelope.rulesVersion, historyComplete:true, notice:'私有仓库：仅公开按日规模，不公开源码与提交详情。', skippedFiles:0, history:[{timestamp:envelope.generatedAt, metrics:{code:10, comment:0, blank:0, documentation:0, files:1}, languages:{}}]};
+  const rebuilt = {...envelope, datasetEpoch:'rebuilt-v1', lineageVersion:'abcdef0123456789', completeness:proof, collection:{repositories:1, failed:0}, repositories:[row]};
+  const root = await fixture(t);
+  await writeFile(join(root, 'web/data/stats.json'), JSON.stringify({...publicStats, datasetEpoch:rebuilt.datasetEpoch, lineageVersion:rebuilt.lineageVersion}));
+  await writeFile(join(root, 'web/data/rebuilt-private-metrics.json'), JSON.stringify(rebuilt));
+  const result = await buildSite({root, requirePrivate:true, logger:{log(){}}});
+  assert.equal(result.repositories[0].name, 'owner/private');
+  assert.equal(result.summary.privateRepositories, 1);
+  assert.equal(result.summary.code, 10);
+  assert.equal(result.publication.privateStatus, 'stale');
+  assert.equal(result.publication.privateUpdatedAt, envelope.generatedAt);
+  assert.equal(result.completeness.complete, false);
+  assert.equal(result.repositories[0].lastSuccessAt, envelope.generatedAt);
+  await writeFile(join(root, 'web/data/rebuilt-private-metrics.json'), JSON.stringify({...rebuilt, rulesVersion:'fedcba9876543210', repositories:[{...row,rulesVersion:'fedcba9876543210'}]}));
+  await assert.rejects(buildSite({root, requirePrivate:true, logger:{log(){}}}), /rules/i);
+});
+
 test('changing display start rebuilds only the site and restores earlier observations from untouched full inputs', async t => {
   const root = await fixture(t);
   const point = (timestamp, code) => ({timestamp, metrics:{code, comment:0, blank:0, documentation:0, files:1}, languages:{Python:{code, comment:0, blank:0, documentation:0, files:1}}});

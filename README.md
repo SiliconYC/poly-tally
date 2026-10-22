@@ -2,6 +2,8 @@
 
 跨仓库的代码规模观察站。独立、只读地从 Git 历史重建代码存量，再把静态数据发布到 GitHub Pages。
 
+收录了所有未被 `archived` 的 Public 和 Private 仓库。私有仓库的源码不公开，但仓库名称与代码规模必须在页面中显示；更新失败或历史重算不得导致已有私有仓库从页面消失。
+
 **在线页面：[代码观察站](https://siliconyc.github.io/poly-tally/)**
 
 [工程约定 Discussion #1](https://github.com/SiliconYC/poly-tally/discussions/1) · [实施与验收 Issue #2](https://github.com/SiliconYC/poly-tally/issues/2) · [采集和部署](https://github.com/SiliconYC/poly-tally/actions/workflows/pages.yml)
@@ -28,7 +30,7 @@
 
 页面可按全部、公开、私有范围筛选。公开仓库保留逐提交统计；私有仓库展示真实名称、日级规模及独立更新时间。浏览器不连接 GitHub API、不持有令牌。
 
-私有统计可以使用已有授权 connector 或本机 Git 凭证重新计算，不要求新建 Key。外部计算完成后，可显式填写 `external_private_blob_sha` 发布经过精确字节及当前契约验证的脱敏结果。可选的 `POLY_TALLY_READ_TOKEN` Secret 仅用于显式启用的受保护持久 runner 采集；未配置且未显式选择外部结果时，旧快照不构成本轮成功证明。本次重置不使用旧批次私有数据，页面明确显示待重算，不会伪装为已完成。
+私有统计可以使用已有授权 connector 或本机 Git 凭证重新计算，不要求新建 Key。外部计算完成后，可显式填写 `external_private_blob_sha` 发布经过精确字节及当前契约验证的脱敏结果。可选的 `POLY_TALLY_READ_TOKEN` Secret 仅用于显式启用的受保护持久 runner 采集。未完成新鲜核对时，保留已有私有统计并显示未刷新状态；不删除私有仓库，也不把原采集时间改成现在。
 
 普通采集是确定性程序，无需 AI 参与决策。网络失败、限流或权限撤回会保留上次成功结果并标记状态；真正需要人工处理时检查 Actions 日志或本地运行摘要即可。
 
@@ -124,11 +126,11 @@ Actions 的 Pages 工作流只采集公开范围，不等待私有重建。私�
 
 ## 本次全量重算批次与同源组
 
-当前新批次为 `source-only-lineage-2026-10-21-v1`，配置和工作流一致。JSON/JSONC/YAML/YML/XML 整类不再纳入，扩展名和等价语言类别双重排除。当前活动数据已清为空的 pending 基线，旧活动 private/retained 文件撤下；不是把旧快照换一个 epoch，也不是已验证的规模为零。明确配置 `vitro → vitro_zero_lab → vitro_union_lab` 为一个统计项；代表名取成员默认分支最新实际提交者，逐时刻只取唯一主导仓库全部指标。挑战者须严格超过当前主导的历史最大代码行才切换，缩减不追随当前最大者，高点跨回切保留。
+当前批次为 `source-only-no-eigen-2026-10-22-v1`，配置和工作流一致。JSON/JSONC/YAML/YML/XML 整类及 Eigen 依赖目录不再纳入。私有历史已从缓存按新规则重算，原始源码不公开。明确配置 `vitro → vitro_zero_lab → vitro_union_lab` 为一个统计项；代表名取成员默认分支最新实际提交者，逐时刻只取唯一主导仓库全部指标。挑战者须严格超过当前主导的历史最大代码行才切换，缩减不追随当前最大者，高点跨回切保留。
 
 `vitro_union_260204_obsoleted` 是普通已归档仓库，不统计；`vitro_agent_foundry` 是独立文档副仓库，不属于继承链。配置组成员即使以后归档仍须扫描。
 
-新 epoch 不恢复旧批次检查点、派生 SQLite 或 retained 私有快照。CLI 将原始对象与按内容/解析版本索引的事实保存在独立 `cache/<public|private>/`，可跨批次复用；规则或同源关系变化仍从零计算派生历史。私有权限不足时新数据仍标记未完成，绝不把现有临时旧页面快照冒充新全量重算。后续完整、同 epoch/同配置的输出才能发布 fresh。自动发现只证实凭据可见范围；此次重算可通过 `--expected-inventory` 提供新鲜 metadata 盘点检测范围缺失，不使用旧规模数据。
+新 epoch 不直接导入旧批次的历史汇总。CLI 将原始对象与按内容/解析版本索引的事实保存在独立 `cache/<public|private>/`，可跨批次复用；规则或同源关系变化仍从零计算派生历史。完整离线重算可作为同批次的 `rebuilt-private-metrics.json` 展示，保留原采集时间并标记未刷新；它不是一次新的成功采集。只有完整的新鲜核对才能发布 fresh。自动发现只证实凭据可见范围，可通过 `--expected-inventory` 检测范围缺失。
 
 精确同刻/平局/空值/分支重算规则、JSON 配置、混合公私隐私边界、CLI 重算与 API 见 [同源组与严格重算](docs/lineage.md)。
 
@@ -198,7 +200,7 @@ python -m poly_tally collect --public-only --import-checkpoint /备份目录/che
 
 `.github/workflows/pages.yml` 先安装锁定的 Python 与 npm 依赖，执行类型检查、React 测试及原有 Python / Node 测试，再恢复状态、采集、安全合并数据、构建、保存公开检查点并部署 `site/`。Vite 固定使用 `/poly-tally/` 项目路径，资源带内容 hash；前端没有运行时 CDN 依赖。`publicDir: false` 禁止整目录复制公开资源，最终数据由 `scripts/build-site.mjs` 在校验后单独写入。
 
-`web/data/stats.json` 当前是本次重置后的空 pending 基线；实际计算后才可生成同 epoch 的脱敏 `private-metrics.json`。旧 retained 过渡仅属于历史版本，本次 source-only 重算禁止采用。后续优先从持久数据分支及本轮作业取得完整新规模，无需反复向 `dev` 提交统计。`--refresh` 刷新产物时间，私有更新时间单独显示。`dev` 保存代码，`tally-state` 保存可公开采集状态。
+正式发布必须带有私有统计。若当前批次既没有完整私有快照，也没有经过范围校验的离线重算快照，构建失败并保留已上线页面，禁止发布只有 Public 仓库的替代页面。离线重算快照通过 `node scripts/state.mjs save-rebuilt-private <文件> --git-credential` 单独保存，验证不得缩减原有私有范围；后续完整采集成功后自动使用更新结果。`dev` 保存代码，`tally-state` 保存公开检查点及脱敏私有统计，无需反复向 `dev` 提交统计。
 
 ## 验收复现
 

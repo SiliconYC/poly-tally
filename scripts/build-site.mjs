@@ -1,7 +1,7 @@
 import {cp, mkdir, rm, writeFile, readFile} from 'node:fs/promises';
 import {resolve} from 'node:path';
 import {pathToFileURL} from 'node:url';
-import {mergePrivateMetrics, validatePrivateMetrics, validateCompletePrivateMetrics, validateRetainedPrivateBaseline, validatePrivateMetricsReplacement} from './metrics.mjs';
+import {mergePrivateMetrics, validatePrivateMetrics, validateCompletePrivateMetrics, validateRebuiltPrivateMetrics, validateRetainedPrivateBaseline, validatePrivateMetricsReplacement} from './metrics.mjs';
 import {applyDisplayWindow} from '../web/model.mjs';
 
 async function bundleSite({root, site}) {
@@ -9,7 +9,7 @@ async function bundleSite({root, site}) {
   await build({configFile: resolve(root, 'vite.config.ts'), root: resolve(root, 'web'), build: {outDir: site}});
 }
 
-export async function buildSite({root = resolve(import.meta.dirname, '..'), privateStatus = process.env.POLY_TALLY_PRIVATE_STATUS, externalPrivateBlobSha = process.env.POLY_TALLY_EXTERNAL_PRIVATE_BLOB_SHA, logger = console, bundle = bundleSite} = {}) {
+export async function buildSite({root = resolve(import.meta.dirname, '..'), privateStatus = process.env.POLY_TALLY_PRIVATE_STATUS, externalPrivateBlobSha = process.env.POLY_TALLY_EXTERNAL_PRIVATE_BLOB_SHA, requirePrivate = process.env.POLY_TALLY_REQUIRE_PRIVATE === 'true', logger = console, bundle = bundleSite} = {}) {
   let data = JSON.parse(await readFile(resolve(root, 'web/data/stats.json'), 'utf8'));
   if (data.schemaVersion !== 1 || !Array.isArray(data.repositories)) throw new Error('Invalid public dataset');
   let display;
@@ -46,8 +46,21 @@ export async function buildSite({root = resolve(import.meta.dirname, '..'), priv
     if (retainedBaseline) validatePrivateMetricsReplacement(retainedBaseline.metrics, privateData, data, {resetEpoch: data.datasetEpoch, preserveScope: true});
     data = mergePrivateMetrics(data, privateData, {privateStatus, externalPrivateBlobSha, privateBytes});
   }
-  if (privateBytes === undefined && retainedBaseline) data = mergePrivateMetrics(data, retainedBaseline.metrics, {retainedBaseline});
-  if (data.datasetEpoch && privateBytes === undefined && !retainedBaseline) {
+  let rebuiltPrivate = false;
+  if (privateBytes === undefined) {
+    try {
+      const rebuilt = JSON.parse(await readFile(resolve(root, 'web/data/rebuilt-private-metrics.json'), 'utf8'));
+      validateRebuiltPrivateMetrics(rebuilt);
+      if (rebuilt.rulesVersion !== data.rules.version) throw new Error('Offline private snapshot rules mismatch.');
+      data = mergePrivateMetrics(data, rebuilt, {privateStatus:'stale'});
+      rebuiltPrivate = true;
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+    }
+  }
+  if (privateBytes === undefined && !rebuiltPrivate && retainedBaseline) data = mergePrivateMetrics(data, retainedBaseline.metrics, {retainedBaseline});
+  if (requirePrivate && !data.repositories.some(repository => repository.visibility === 'private')) throw new Error('Private snapshot required; refusing to replace the published site with public repositories alone.');
+  if (data.datasetEpoch && privateBytes === undefined && !rebuiltPrivate && !retainedBaseline) {
     data.publication = {privateRepositories: 0, privateUpdatedAt: null, privateSource: null, privateStatus: 'pending-rebuild'};
     if (data.lineageVersion) {
       data.publication.publicCompleteness = structuredClone(data.completeness ?? null);

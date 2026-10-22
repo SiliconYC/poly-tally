@@ -47,7 +47,7 @@
 
 ## 离线结果与正常发布
 
-离线运行记录包含 `offline=true`、`completeness.discoveryComplete=false` 和 `completeness.complete=false`。`lastSuccessAt` 保持来源时间，不能将重算时刻冒充源站采集时刻。私有导出仍只含仓库名称和日级规模；源码、文件路径、逐提交身份与完整 SQLite 留在本地。离线输出可用于检查纠偏，但不会通过要求完整新鲜采集的正式发布校验。
+离线运行记录包含 `offline=true`、`completeness.discoveryComplete=false` 和 `completeness.complete=false`。`lastSuccessAt` 保持来源时间，不能将重算时刻冒充源站采集时刻。私有导出仍只含仓库名称和日级规模；源码、文件路径、逐提交身份与完整 SQLite 留在本地。离线输出不能冒充 fresh，但完整重放、无失败且未缩减已有私有范围的快照，可通过 `save-rebuilt-private` 保存并以未刷新状态展示。新鲜核对尚未完成，不能成为删除私有仓库展示的理由。
 
 完成重算后，正常更新：
 

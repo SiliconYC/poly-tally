@@ -92,6 +92,7 @@ jobs:
           python -m poly_tally collect --public-only --refresh --state "$state" --cache .poly-tally/cache "${partial[@]}" --checkpoint .poly-tally/checkpoint.json "${restore[@]}"
       - name: Build dashboard with current-epoch metrics; leave incomplete rebuild visibly pending
         env:
+          POLY_TALLY_REQUIRE_PRIVATE: 'true'
           POLY_TALLY_EXTERNAL_PRIVATE_BLOB_SHA: ${{ github.event_name == 'workflow_dispatch' && inputs.external_private_blob_sha || '' }}
           PRIVATE_SCAN_STATUS: not-configured
         run: POLY_TALLY_PRIVATE_STATUS="$(node scripts/metrics.mjs status)" node scripts/build-site.mjs
