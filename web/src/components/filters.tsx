@@ -58,7 +58,7 @@ export function DashboardFilters({
   );
   const selectedIds = useMemo(() => new Set(filters.ids), [filters.ids]);
   return (
-    <section aria-label="全局筛选" className="space-y-3">
+    <section aria-label="全局筛选" className="filter-bar space-y-3">
       <div className="flex flex-wrap items-center gap-2">
         <Tabs
           value={filters.mode}

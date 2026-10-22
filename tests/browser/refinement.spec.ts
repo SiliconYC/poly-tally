@@ -56,6 +56,77 @@ test("non-editable text has no caret or selection while search remains editable"
     await input.evaluate((element) => getComputedStyle(element).caretColor),
   ).not.toBe("rgba(0, 0, 0, 0)");
 });
+test("overview metrics retain keyboard activation and visible focus", async ({
+  page,
+}) => {
+  await open(page);
+  const total = page.getByRole("button", { name: "总行数 52", exact: true });
+  await total.focus();
+  await page.keyboard.press("Enter");
+  await expect(total).toHaveAttribute("aria-pressed", "true");
+  await expect(total).toBeFocused();
+  expect(
+    await total.evaluate((element) => {
+      const style = getComputedStyle(element);
+      return (
+        style.outlineStyle !== "none" && parseFloat(style.outlineWidth) >= 2
+      );
+    }),
+  ).toBe(true);
+  await page.keyboard.press("Tab");
+  const code = page.getByRole("button", { name: "代码行 40", exact: true });
+  await expect(code).toBeFocused();
+  await page.keyboard.press("Space");
+  await expect(code).toHaveAttribute("aria-pressed", "true");
+  await expect(total).toHaveAttribute("aria-pressed", "false");
+  await expect(page.locator("#history [data-slot=card-title]")).toContainText(
+    "代码行",
+  );
+});
+test("chart axes remain legible in both themes", async ({ page }) => {
+  await open(page);
+  for (const theme of ["light", "dark"]) {
+    if (theme === "dark")
+      await page.getByRole("button", { name: "切换深色模式" }).click();
+    for (const selector of ["#history", '[data-panel="changes"]']) {
+      const contrast = await page
+        .locator(`${selector} text[orientation="bottom"]`)
+        .first()
+        .evaluate((element) => {
+          function luminance(color: string) {
+            const channels = color
+              .match(/[\d.]+/g)!
+              .slice(0, 3)
+              .map(Number)
+              .map((value) => {
+                const channel = value / 255;
+                return channel <= 0.04045
+                  ? channel / 12.92
+                  : ((channel + 0.055) / 1.055) ** 2.4;
+              });
+            return (
+              channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722
+            );
+          }
+          let parent: Element | null = element;
+          let background = "rgba(0, 0, 0, 0)";
+          while (parent && background === "rgba(0, 0, 0, 0)") {
+            background = getComputedStyle(parent).backgroundColor;
+            parent = parent.parentElement;
+          }
+          const values = [
+            luminance(getComputedStyle(element).fill),
+            luminance(background),
+          ];
+          return (Math.max(...values) + 0.05) / (Math.min(...values) + 0.05);
+        });
+      expect(
+        contrast,
+        `${theme} ${selector} axis contrast`,
+      ).toBeGreaterThanOrEqual(4.5);
+    }
+  }
+});
 test("history tooltip follows the pointer, avoids edges, and clears on leave", async ({
   page,
 }) => {

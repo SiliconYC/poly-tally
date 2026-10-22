@@ -10,16 +10,10 @@ import {
   Activity,
   AlertCircle,
   ArrowUpRight,
-  Code2,
-  Files,
   GitFork,
-  Layers2,
-  MessageSquare,
   Moon,
   RefreshCw,
   Sun,
-  TextCursorInput,
-  BookOpen,
   ChevronDown,
   Info,
   CircleCheck,
@@ -75,14 +69,6 @@ const ChangesChart = lazy(() =>
 );
 import { cn } from "@/lib/utils";
 
-const metricIcons = {
-  total: Layers2,
-  code: Code2,
-  comment: MessageSquare,
-  documentation: BookOpen,
-  blank: TextCursorInput,
-  files: Files,
-};
 const defaultLoad = () => loadStats();
 
 function Header({
@@ -96,29 +82,25 @@ function Header({
 }) {
   const { resolvedTheme, setTheme } = useTheme();
   return (
-    <header className="border-b bg-card">
-      <div className="mx-auto flex h-[76px] max-w-[1536px] items-center justify-between gap-3 px-4 sm:px-8">
-        <a
-          href="#main"
-          className="flex items-center gap-2.5 font-semibold tracking-tight"
-        >
-          <span className="flex size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-            <Layers2 className="size-4.5" />
+    <header className="site-header">
+      <div className="page-width header-inner">
+        <a href="#main" className="brand">
+          <span className="brand-mark" aria-hidden="true">
+            <i />
+            <i />
+            <i />
+            <i />
           </span>
-          <h1 className="text-xl font-semibold tracking-tight">
+          <h1 className="brand-name">
             Poly Tally<span className="text-primary">.</span>
           </h1>
-          <span className="ml-3 hidden h-5 w-px bg-border sm:block" />
+        </a>
+        <div className="flex items-center gap-1.5">
           {updatedAt && (
-            <time
-              dateTime={updatedAt}
-              className="hidden text-xs font-normal text-muted-foreground sm:block"
-            >
+            <time dateTime={updatedAt} className="header-date">
               {dateLabel(updatedAt)} UTC
             </time>
           )}
-        </a>
-        <div className="flex items-center gap-1.5">
           <Button
             variant="ghost"
             size="icon"
@@ -152,6 +134,7 @@ function Header({
               href="https://github.com/SiliconYC/poly-tally"
               target="_blank"
               rel="noopener noreferrer"
+              aria-label="在 GitHub 查看 Poly Tally（新标签页）"
             >
               <GitFork className="size-4" />
               <span className="hidden sm:inline">GitHub</span>
@@ -215,7 +198,7 @@ function Dashboard({ data }: { data: Dataset }) {
     "pending-rebuild": "私有指标等待重新采集",
   };
   return (
-    <div className="space-y-5">
+    <div className="dashboard">
       <DashboardFilters
         key={resetKey}
         data={data}
@@ -236,51 +219,25 @@ function Dashboard({ data }: { data: Dataset }) {
           </div>
         </div>
       )}
-      <section
-        aria-label="统计概览"
-        className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6"
-      >
+      <section aria-label="统计概览" className="metrics">
         {metricOrder.map((metric) => {
-          const Icon = metricIcons[metric],
-            active = filters.metric === metric;
+          const active = filters.metric === metric;
           return (
-            <Card
+            <button
               key={metric}
-              className={cn(
-                "gap-0 overflow-hidden rounded-xl py-0 shadow-none transition-colors",
-                active && "border-foreground bg-foreground text-background",
-              )}
+              className="metric"
+              aria-label={`${METRIC_LABELS[metric]} ${format(totals[metric])}`}
+              aria-pressed={active}
+              onClick={() => updateFilters({ metric })}
             >
-              <button
-                className="w-full rounded-xl p-4 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 sm:p-5"
-                aria-label={`${METRIC_LABELS[metric]} ${format(totals[metric])}`}
-                aria-pressed={active}
-                onClick={() => updateFilters({ metric })}
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <span
-                    className={cn(
-                      "text-xs font-medium",
-                      active ? "text-background/70" : "text-muted-foreground",
-                    )}
-                  >
-                    {METRIC_LABELS[metric]}
-                  </span>
-                  <Icon
-                    className={cn(
-                      "size-4 text-muted-foreground/70",
-                      active && "text-background/60",
-                    )}
-                  />
-                </div>
-                <div
-                  className="mt-4 text-[27px] font-semibold tracking-[-0.045em] tabular-nums sm:text-[30px]"
-                  data-testid={`metric-${metric}`}
-                >
-                  {format(totals[metric])}
-                </div>
-              </button>
-            </Card>
+              <span className="metric-label">
+                {METRIC_LABELS[metric]}
+                <span className="metric-indicator" aria-hidden="true" />
+              </span>
+              <span className="metric-value" data-testid={`metric-${metric}`}>
+                {format(totals[metric])}
+              </span>
+            </button>
           );
         })}
       </section>
@@ -297,7 +254,7 @@ function Dashboard({ data }: { data: Dataset }) {
           onRangeChange={setRange}
         />
       </Suspense>
-      <div className="grid min-w-0 gap-6 lg:grid-cols-2">
+      <div className="analysis-grid">
         <Suspense fallback={<Skeleton className="h-96" />}>
           <CompositionChart
             key={`composition-${resetKey}`}
@@ -325,7 +282,7 @@ function Dashboard({ data }: { data: Dataset }) {
         generatedAt={data.generatedAt}
         onCopy={onCopy}
       />
-      <details className="group border-t pt-4">
+      <details className="dashboard-notes group border-t pt-4">
         <summary className="flex cursor-pointer list-none items-center gap-2 text-xs text-muted-foreground [&::-webkit-details-marker]:hidden">
           <Info className="size-3.5" />
           统计说明
@@ -489,10 +446,7 @@ function Application({
         updatedAt={data?.generatedAt}
         onRefresh={() => setRevision((value) => value + 1)}
       />
-      <main
-        id="main"
-        className="mx-auto max-w-[1536px] px-4 py-5 sm:px-8 sm:py-7"
-      >
+      <main id="main" className="page-width main-content">
         {loading ? (
           <div
             role="status"

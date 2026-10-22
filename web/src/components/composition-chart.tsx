@@ -33,27 +33,27 @@ type Props = {
 };
 type Item = { id: string; name: string; value: number; color: string };
 const palette = [
-  "#0d9488",
-  "#3b82f6",
-  "#8b5cf6",
-  "#d69b32",
-  "#0891b2",
-  "#64748b",
-  "#6366f1",
+  "#5c8061",
+  "#9fac7b",
+  "#a58b93",
+  "#c8ab68",
+  "#6f9193",
+  "#899082",
+  "#7a899b",
 ];
 const languageColors: Record<string, string> = {
-  Python: "#0d9488",
-  C: "#3b82f6",
-  "C++": "#6366f1",
-  "C#": "#8b5cf6",
-  TypeScript: "#3b82f6",
-  JavaScript: "#d69b32",
-  TSX: "#8b5cf6",
-  Go: "#0891b2",
-  Rust: "#c47b43",
-  Markdown: "#64748b",
-  HTML: "#db8a52",
-  CSS: "#9b7acb",
+  Python: "#5c8061",
+  C: "#9fac7b",
+  "C++": "#7a899b",
+  "C#": "#a58b93",
+  TypeScript: "#9fac7b",
+  JavaScript: "#c8ab68",
+  TSX: "#a58b93",
+  Go: "#6f9193",
+  Rust: "#b38162",
+  Markdown: "#899082",
+  HTML: "#c49472",
+  CSS: "#9a8aab",
 };
 function languageColor(name: string) {
   let hash = 0;
@@ -83,7 +83,7 @@ export function CompositionChart({
             }[]
           ).map((item) => ({
             ...item,
-            color: colors.get(item.id) ?? "#0d9488",
+            color: colors.get(item.id) ?? "#5c8061",
           }))
         : (
             languageTotals(repositories, metric) as {
@@ -124,9 +124,9 @@ export function CompositionChart({
   return (
     <Card
       data-panel="composition"
-      className="@container min-w-0 gap-0 overflow-hidden rounded-lg border-border/70 py-0 shadow-none"
+      className="dashboard-panel @container min-w-0 gap-0 py-0 shadow-none"
     >
-      <CardHeader className="flex flex-wrap items-center justify-between gap-x-4 gap-y-3 border-b border-border/60 px-5 py-4">
+      <CardHeader className="panel-heading flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
         <CardTitle className="text-base font-medium">规模构成</CardTitle>
         <div className="ml-auto flex flex-wrap items-center gap-2">
           <Tabs
@@ -158,9 +158,9 @@ export function CompositionChart({
           </Select>
         </div>
       </CardHeader>
-      <CardContent className="p-5">
+      <CardContent className="analysis-content">
         {total > 0 ? (
-          <div className="grid min-w-0 gap-5 @min-[560px]:grid-cols-[230px_minmax(0,1fr)] @min-[560px]:items-center">
+          <div className="grid min-w-0 gap-5 @min-[520px]:grid-cols-[200px_minmax(0,1fr)] @min-[520px]:items-center">
             <ChartContainer
               config={config}
               className="mx-auto h-[250px] w-full max-w-[290px] aspect-square"
@@ -183,8 +183,8 @@ export function CompositionChart({
                   data={items}
                   dataKey="value"
                   nameKey="name"
-                  innerRadius={73}
-                  outerRadius={106}
+                  innerRadius={76}
+                  outerRadius={98}
                   strokeWidth={2}
                   stroke="var(--background)"
                   isAnimationActive={false}
@@ -222,7 +222,7 @@ export function CompositionChart({
                           <tspan
                             x={viewBox.cx}
                             dy="27"
-                            className="fill-foreground text-2xl font-semibold tabular-nums"
+                            className="composition-total fill-foreground tabular-nums"
                           >
                             {compact(selected?.value ?? total)}
                           </tspan>

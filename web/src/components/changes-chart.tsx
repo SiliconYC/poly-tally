@@ -59,16 +59,18 @@ export function ChangesChart({ repositories, language, since, until }: Props) {
     return [low - padding, high + padding] as [number, number];
   }, [periods]);
   const config = useMemo(
-    () => ({ change: { label: METRIC_LABELS[metric], color: "#0d9488" } }),
+    () => ({
+      change: { label: METRIC_LABELS[metric], color: "var(--chart-1)" },
+    }),
     [metric],
   );
 
   return (
     <Card
       data-panel="changes"
-      className="min-w-0 gap-0 overflow-hidden rounded-lg border-border/70 py-0 shadow-none"
+      className="dashboard-panel min-w-0 gap-0 py-0 shadow-none"
     >
-      <CardHeader className="flex flex-wrap items-center justify-between gap-x-4 gap-y-3 border-b border-border/60 px-5 py-4">
+      <CardHeader className="panel-heading flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
         <CardTitle className="text-base font-medium">净变化</CardTitle>
         <div className="ml-auto flex flex-wrap items-center gap-2">
           <Tabs
@@ -104,7 +106,7 @@ export function ChangesChart({ repositories, language, since, until }: Props) {
           </Select>
         </div>
       </CardHeader>
-      <CardContent className="p-5">
+      <CardContent className="analysis-content">
         {periods.length ? (
           <ChartContainer
             config={config}
@@ -170,7 +172,7 @@ export function ChangesChart({ repositories, language, since, until }: Props) {
               <Bar
                 dataKey="change"
                 maxBarSize={32}
-                radius={2}
+                radius={3}
                 isAnimationActive={false}
               >
                 {periods.map((item) => (
@@ -178,8 +180,8 @@ export function ChangesChart({ repositories, language, since, until }: Props) {
                     key={item.key}
                     fill={
                       item.change !== null && item.change < 0
-                        ? "#cb8063"
-                        : "#0d9488"
+                        ? "var(--chart-negative)"
+                        : "var(--chart-1)"
                     }
                   />
                 ))}

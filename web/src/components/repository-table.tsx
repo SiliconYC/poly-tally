@@ -159,8 +159,8 @@ export function RepositoryTable({
     [filtered, language],
   );
   return (
-    <Card className="gap-4 shadow-none" id="repositories">
-      <CardHeader>
+    <Card className="dashboard-panel gap-0 py-0 shadow-none" id="repositories">
+      <CardHeader className="panel-heading">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div className="space-y-1.5">
             <CardTitle>
@@ -182,7 +182,7 @@ export function RepositoryTable({
           </Button>
         </div>
       </CardHeader>
-      <CardContent className="space-y-4">
+      <CardContent className="repository-content space-y-4">
         <div className="relative max-w-sm">
           <Search className="absolute left-3 top-2.5 size-4 text-muted-foreground" />
           <Input
@@ -193,7 +193,7 @@ export function RepositoryTable({
             className="pl-9"
           />
         </div>
-        <div className="overflow-hidden rounded-lg border">
+        <div className="repository-table">
           <Table>
             <TableHeader>
               {table.getHeaderGroups().map((group) => (

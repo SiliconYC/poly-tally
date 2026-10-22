@@ -1,4 +1,4 @@
-import { memo, useMemo, useRef, useState } from "react";
+import { memo, useId, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
 import { Area, AreaChart, Brush, CartesianGrid, XAxis, YAxis } from "recharts";
 import { ChevronLeft, ChevronRight, RotateCcw } from "lucide-react";
@@ -67,6 +67,7 @@ const HistoryPlot = memo(function HistoryPlot({
   percent: boolean;
   maximum: number;
 }) {
+  const gradientId = useId().replace(/:/g, "");
   return (
     <ChartContainer
       config={config}
@@ -77,6 +78,29 @@ const HistoryPlot = memo(function HistoryPlot({
         margin={{ top: 12, right: 16, left: 12, bottom: 8 }}
         accessibilityLayer={false}
       >
+        <defs>
+          {series.map((item, column) => (
+            <linearGradient
+              key={item.id}
+              id={`${gradientId}-${column}`}
+              x1="0"
+              y1="0"
+              x2="0"
+              y2="1"
+            >
+              <stop
+                offset="0%"
+                stopColor={colors.get(item.id)}
+                stopOpacity={0.8}
+              />
+              <stop
+                offset="100%"
+                stopColor={colors.get(item.id)}
+                stopOpacity={0.3}
+              />
+            </linearGradient>
+          ))}
+        </defs>
         <CartesianGrid vertical={false} strokeDasharray="3 3" />
         <XAxis
           dataKey="time"
@@ -104,8 +128,10 @@ const HistoryPlot = memo(function HistoryPlot({
             dataKey={`v${column}`}
             stackId="stock"
             stroke={colors.get(item.id)}
-            fill={colors.get(item.id)}
-            fillOpacity={0.8}
+            strokeWidth={1.2}
+            strokeOpacity={0.9}
+            fill={`url(#${gradientId}-${column})`}
+            fillOpacity={1}
             isAnimationActive={false}
             dot={false}
             activeDot={false}
@@ -116,7 +142,9 @@ const HistoryPlot = memo(function HistoryPlot({
   );
 });
 
-const navigatorConfig = { total: { label: "历史规模", color: "#0d9488" } };
+const navigatorConfig = {
+  total: { label: "历史规模", color: "var(--chart-1)" },
+};
 const HistoryNavigator = memo(function HistoryNavigator({
   overview,
   start,
@@ -173,8 +201,8 @@ const HistoryNavigator = memo(function HistoryNavigator({
             <Area
               dataKey="total"
               type="stepAfter"
-              stroke="#0d9488"
-              fill="#0d9488"
+              stroke="var(--chart-1)"
+              fill="var(--chart-1)"
               fillOpacity={0.2}
               isAnimationActive={false}
             />
@@ -250,7 +278,10 @@ export function HistoryChart({
       Object.fromEntries(
         result.series.map((series, index) => [
           `v${index}`,
-          { label: series.name, color: colors.get(series.id) ?? "#0d9488" },
+          {
+            label: series.name,
+            color: colors.get(series.id) ?? "var(--chart-1)",
+          },
         ]),
       ),
     [result.series, colors],
@@ -372,9 +403,9 @@ export function HistoryChart({
   return (
     <Card
       id="history"
-      className="min-w-0 gap-0 overflow-hidden rounded-xl border-border/70 py-0 shadow-none scroll-mt-24"
+      className="dashboard-panel min-w-0 gap-0 py-0 shadow-none scroll-mt-24"
     >
-      <CardHeader className="flex flex-wrap items-center justify-between gap-3 border-b border-border/60 px-5 py-4">
+      <CardHeader className="panel-heading flex flex-wrap items-center justify-between gap-3">
         <div className="space-y-1.5">
           <CardTitle className="text-base font-medium">
             历史趋势
@@ -394,7 +425,7 @@ export function HistoryChart({
           </TabsList>
         </Tabs>
       </CardHeader>
-      <CardContent className="space-y-4 p-5">
+      <CardContent className="history-content space-y-4">
         <details className="group">
           <summary className="w-fit cursor-pointer list-none text-xs text-muted-foreground hover:text-foreground [&::-webkit-details-marker]:hidden">
             仓库图层（{ordered.length}）

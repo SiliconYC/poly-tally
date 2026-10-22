@@ -377,7 +377,7 @@ test("pagination and additive multi-field sorting keep totals over the full filt
   expect(searchedCsv).not.toContain("repo-099,公开");
 });
 
-test("390px and 1440px support light/dark without page overflow and persist theme", async ({
+test("mobile, tablet and desktop support light/dark without page overflow and persist theme", async ({
   page,
 }) => {
   await open(page);
@@ -385,7 +385,7 @@ test("390px and 1440px support light/dark without page overflow and persist them
   await expect(page.locator("html")).toHaveClass(/dark/);
   await page.reload();
   await expect(page.locator("html")).toHaveClass(/dark/);
-  for (const width of [1440, 390]) {
+  for (const width of [1440, 1200, 1024, 768, 390, 320]) {
     await page.setViewportSize({ width, height: 1000 });
     await expect
       .poll(() =>
@@ -420,6 +420,13 @@ test("published real data matches the existing model in every metric and leaves 
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
   await open(page, data);
+  await expect(page.locator("#history .recharts-area").first()).toBeVisible();
+  await expect(
+    page.locator('[data-panel="composition"] .recharts-pie-sector').first(),
+  ).toBeVisible();
+  await expect(
+    page.locator('[data-panel="changes"] .recharts-bar-rectangle').first(),
+  ).toBeVisible();
   for (const metric of [
     "total",
     "code",
@@ -431,7 +438,7 @@ test("published real data matches the existing model in every metric and leaves 
     await expect(page.getByTestId(`metric-${metric}`)).toHaveText(
       new Intl.NumberFormat("zh-CN").format(totals[metric]),
     );
-  await mkdir("docs/qa/react-refinement", { recursive: true });
+  await mkdir("docs/qa/visual-refresh", { recursive: true });
   for (const width of [1440, 390]) {
     await page.setViewportSize({ width, height: 1100 });
     if (
@@ -441,12 +448,12 @@ test("published real data matches the existing model in every metric and leaves 
     )
       await page.getByRole("button", { name: "切换浅色模式" }).click();
     await page.screenshot({
-      path: `docs/qa/react-refinement/${width}-light.png`,
+      path: `docs/qa/visual-refresh/${width}-light.png`,
       fullPage: true,
     });
     await page.getByRole("button", { name: "切换深色模式" }).click();
     await page.screenshot({
-      path: `docs/qa/react-refinement/${width}-dark.png`,
+      path: `docs/qa/visual-refresh/${width}-dark.png`,
       fullPage: true,
     });
     await expect
@@ -532,10 +539,10 @@ test("large aligned histories render without discarding changes and remain inter
     expect(percentMs).toBeLessThan(6000);
     expect(keyboardMs).toBeLessThan(6000);
   }
-  await mkdir("docs/qa/react-refinement", { recursive: true });
+  await mkdir("docs/qa/visual-refresh", { recursive: true });
   const { writeFile } = await import("node:fs/promises");
   await writeFile(
-    "docs/qa/react-refinement/browser-performance.json",
+    "docs/qa/visual-refresh/browser-performance.json",
     JSON.stringify(
       {
         browser: await page.context().browser()!.version(),
