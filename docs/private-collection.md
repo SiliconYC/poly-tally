@@ -76,7 +76,21 @@ Codex 或本机 Git 的仓库授权与 GitHub Actions 的授权是两回事。Ac
 
 该令牌本身允许下载授权范围内的私有源码。只读可以防止修改仓库，但不能阻止持有令牌的人读取源码。仓库访客无法直接读取 Secret；能够修改受信任 `dev` 工作流的人可能通过代码使用或泄漏它，因此只有可信维护者应拥有写权限。令牌到期或怀疑泄漏时应撤销并更换。
 
-私有计算作业只运行于定时、手动或 `dev` 推送，不向 PR 分发 Secret。私有对象与 SQLite 不进入公开仓库的 Actions cache 或 artifact，作业结束时清理临时状态；只有经过字段白名单检查的日级规模可以上传。未配置安全的私有持久化服务前，云端私有作业每轮完整回填，因此会比本地增量慢；本地保留对象缓存，可增量处理。
+Pages 工作流不再启动临时私有全量采集。`private-local.yml` 只在仓库变量 `POLY_TALLY_PRIVATE_RUNNER=enabled` 时启用，要求专用且受保护的 `self-hosted, poly-tally-private` runner，以及只读源凭据；不运行不可信 PR。原始对象、解析事实及派生状态保存在 runner 的持久工具目录，不进入公开 Actions cache/artifact。未启用时使用下文的本地增量命令。
+
+## 本地增量采集并发布
+
+在仓库根目录运行：
+
+```bash
+node scripts/update-local.mjs
+```
+
+默认复用 `.poly-tally/local/`。命令自动发现公开及私有范围，核对默认分支，仅下载变化的仓库并计算新增历史；采集失败立即停止发布。成功后只上传脱敏私有快照，再用实际远端 blob SHA 显式触发 Pages。公开数据由 Pages 独立增量采集，避免旧本地检查点覆盖并行云端结果。
+
+本机 Git credential helper 或环境变量提供凭证，令牌不写文件。`POLY_TALLY_LOCAL_STATE` 可指定长期状态根目录，`POLY_TALLY_PYTHON` 可指定 Python。源读取凭证 `POLY_TALLY_TOKEN` 与项目发布凭证 `GH_TOKEN` 可以独立配置。默认不会替用户安装定时任务；可选持久 runner 工作流也必须显式启用。
+
+本地 `latest-report.json` 包含逐仓库诊断、阶段耗时及总耗时，不可原样公开。性能指标中 `parseSeconds` 属于 `computeSeconds` 子集，不能重复相加；元数据读取、导出等剩余时间体现在总耗时中。
 
 ## 恢复与规则变化
 
@@ -94,6 +108,6 @@ Codex 或本机 Git 的仓库授权与 GitHub Actions 的授权是两回事。Ac
 
 按用户本次明确要求，`web/data/private-metrics.json` 和 `retained-private-baseline.json` 的旧活动统计已撤下；项目配置 JSON 并未删除。当前源码内置统计是空的 `pending-rebuild` 占位，`completeness.complete=false`；零值不是已验证的真实总量。
 
-旧 retained 机制只保留历史审计说明，不允许进入新同源 epoch，也不能在页面显示为本次新统计。新规则全量计算必须使用独立状态，不加载旧检查点、对象/解析缓存。可恢复的 Git 历史不等于可复用的成功输入。
+旧 retained 机制只保留历史审计说明，不允许进入新同源 epoch，也不能在页面显示为本次新统计。新规则全量计算必须使用独立派生状态，不加载旧检查点。2026-10-22 起，CLI 的独立原始对象与版本化解析事实可跨批次复用；它们不是旧统计成功的证明，仍需重新发现授权范围、核对默认分支并完整重算。
 
 普通归档仓库排除；明确配置的同源组成员不受归档状态排除。当前组仅为 `vitro → vitro_zero_lab → vitro_union_lab`；`vitro_union_260204_obsoleted` 不在组且已归档，排除；`vitro_agent_foundry` 独立统计。

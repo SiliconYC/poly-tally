@@ -48,6 +48,25 @@ class Test采集_类(unittest.TestCase):
         self.assertNotIn("private-oid", 文本)
         self.assertEqual(数据["summary"]["code"], 3)
 
+    def test_运行阶段耗时不累计此前采集(self) -> None:
+        采集器 = 采集器_类(self.配置, self.根 / "timing-state", None, True)
+        self.addCleanup(采集器.api_关闭)
+        采集器.引擎.阶段耗时.update({"fetchSeconds": 1.5, "computeSeconds": 2.0, "parseSeconds": 1.0})
+        with patch.object(采集器.发现器, "api_发现", return_value=[]):
+            运行 = 采集器.api_采集()
+        self.assertEqual(运行["phases"]["fetchSeconds"], 0)
+        self.assertEqual(运行["phases"]["computeSeconds"], 0)
+
+    def test_公开扫描不得将旧私有冷数据解析到公开事实缓存(self) -> None:
+        私有 = {**self.状态, "private": True, "status": "cold", "rulesVersion": "old"}
+        self.库.api_保存仓库(私有)
+        采集器 = 采集器_类(self.配置, self.根 / "state", None, True, arg_缓存目录=self.根 / "cache/public")
+        self.addCleanup(采集器.api_关闭)
+        元数据 = {"id": 1, "full_name": "fixture/one", "private": True, "archived": False}
+        with patch.object(采集器.发现器, "api_发现", return_value=[元数据]), patch.object(采集器.引擎, "api_重算冷数据", side_effect=AssertionError("不得读取私有对象")):
+            采集器.api_采集()
+        self.assertEqual(采集器.引擎.数据库.连接.execute("SELECT count(*) FROM facts.blobs").fetchone()[0], 0)
+
     def test_三仓库历史回填不用发现日期(self) -> None:
         for 序号, 日期 in [(2, "2024-02-01"), (3, "2024-03-01")]:
             状态 = copy.deepcopy(self.状态)

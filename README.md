@@ -6,7 +6,7 @@
 
 [工程约定 Discussion #1](https://github.com/SiliconYC/poly-tally/discussions/1) · [实施与验收 Issue #2](https://github.com/SiliconYC/poly-tally/issues/2) · [采集和部署](https://github.com/SiliconYC/poly-tally/actions/workflows/pages.yml)
 
-私有规模支持按用户授权显示真实仓库名与日级规模，源码和 Git 提交细节不公开。本次活动统计已重置，待新口径完成采集。已有授权与可选云端配置见 [私有采集说明](docs/private-collection.md)。
+私有规模支持按用户授权显示真实仓库名与日级规模，源码和 Git 提交细节不公开。活动统计以 `tally-state` 的完整采集及实际 Pages 发布为准；本地 Native Git 支持持久缓存和增量更新。已有授权与可选云端配置见 [私有采集说明](docs/private-collection.md)。
 
 下载依赖、构建产物、日志和调试输出使用统一规则排除，修改规则会重算历史。识别依据、保留边界和修改方法见 [收录与屏蔽规则](docs/content-policy.md)。
 
@@ -26,9 +26,11 @@
 
 页面可按全部、公开、私有范围筛选。公开仓库保留逐提交统计；私有仓库展示真实名称、日级规模及独立更新时间。浏览器不连接 GitHub API、不持有令牌。
 
-私有统计可以使用已有授权 connector 或本机 Git 凭证重新计算，不要求新建 Key。外部计算完成后，可显式填写 `external_private_blob_sha` 发布经过精确字节及当前契约验证的脱敏结果。可选的 `POLY_TALLY_READ_TOKEN` Secret 仅用于云端持续自动采集；未配置且未显式选择外部结果时，旧快照不构成本轮成功证明。本次重置不使用旧批次私有数据，页面明确显示待重算，不会伪装为已完成。
+私有统计可以使用已有授权 connector 或本机 Git 凭证重新计算，不要求新建 Key。外部计算完成后，可显式填写 `external_private_blob_sha` 发布经过精确字节及当前契约验证的脱敏结果。可选的 `POLY_TALLY_READ_TOKEN` Secret 仅用于显式启用的受保护持久 runner 采集；未配置且未显式选择外部结果时，旧快照不构成本轮成功证明。本次重置不使用旧批次私有数据，页面明确显示待重算，不会伪装为已完成。
 
 普通采集是确定性程序，无需 AI 参与决策。网络失败、限流或权限撤回会保留上次成功结果并标记状态；真正需要人工处理时检查 Actions 日志或本地运行摘要即可。
+
+2026-10-22 已完成本机空缓存全量实测：29/29 个源仓库，完整采集约 9 分钟，保留对象与事实后的全历史重算约 39 秒。后续使用 `node scripts/update-local.mjs` 增量采集并发布，详见 [性能记录与更新方法](docs/native-history-performance.md)。
 
 ## 快速运行
 
@@ -47,7 +49,7 @@ node scripts/build-site.mjs
 python -m http.server 4187 --bind 127.0.0.1 --directory site
 ```
 
-打开本地 `http://127.0.0.1:4187/`。首次回填可能较慢；后续运行复用 blob 解析与历史前缀。HEAD、分支、规则不变时，文件解析数、对象读取数和重算提交数均为零。
+打开本地 `http://127.0.0.1:4187/`。首次回填可能较慢；后续运行复用 blob 解析与历史前缀。本轮授权元数据确认 HEAD、分支、规则不变时，Git fetch、文件解析、对象读取和重算提交数均为零。
 
 运行摘要包含 `parsedBlobs`、`objectReads`、`cacheHits`、`recomputedCommits`、`skippedBlobs`、失败仓库数与耗时。部分失败默认返回非零退出码，同时导出完整的最后成功版本；`--allow-partial` 允许带明确失败状态发布。
 
@@ -103,7 +105,7 @@ unset POLY_TALLY_TOKEN
 python -m poly_tally collect --git-credential --include-private-metrics --private-metrics-output .poly-tally/private-metrics.json --output .poly-tally/combined-stats.json --refresh
 ```
 
-Actions 将公开与私有计算分开。公开作业使用本仓库 `contents: read` 与公开缓存；可选私有作业使用专用只读 Secret，原始对象和 SQLite 不缓存或上传，只有验证后的日级规模可进入产物。独立持久化作业才拥有 `contents: write`，只写本项目 `tally-state`；部署作业只有 Pages 和 OIDC 权限。不会向源仓库写入。
+Actions 的 Pages 工作流只采集公开范围，不等待私有重建。私有范围使用本地持久状态，或显式启用 `private-local.yml` 的专用 self-hosted runner。私有原始对象和 SQLite 不进入公开 Actions cache/artifact，只有验证后的日级规模可上传。独立持久化作业才拥有 `contents: write`，只写本项目 `tally-state`；部署作业只有 Pages 和 OIDC 权限。不会向源仓库写入。
 
 ## 本次全量重算批次与同源组
 
@@ -111,7 +113,7 @@ Actions 将公开与私有计算分开。公开作业使用本仓库 `contents: 
 
 `vitro_union_260204_obsoleted` 是普通已归档仓库，不统计；`vitro_agent_foundry` 是独立文档副仓库，不属于继承链。配置组成员即使以后归档仍须扫描。
 
-新 epoch 不恢复任何旧批次检查点、SQLite、对象/解析缓存或 retained 私有快照。私有权限不足时新数据仍标记未完成，绝不把现有临时旧页面快照冒充新全量重算。后续完整、同 epoch/同配置的输出才能发布 fresh。自动发现只证实凭据可见范围；此次重算可通过 `--expected-inventory` 提供新鲜 metadata 盘点检测范围缺失，不使用旧规模数据。
+新 epoch 不恢复旧批次检查点、派生 SQLite 或 retained 私有快照。CLI 将原始对象与按内容/解析版本索引的事实保存在独立 `cache/<public|private>/`，可跨批次复用；规则或同源关系变化仍从零计算派生历史。私有权限不足时新数据仍标记未完成，绝不把现有临时旧页面快照冒充新全量重算。后续完整、同 epoch/同配置的输出才能发布 fresh。自动发现只证实凭据可见范围；此次重算可通过 `--expected-inventory` 提供新鲜 metadata 盘点检测范围缺失，不使用旧规模数据。
 
 精确同刻/平局/空值/分支重算规则、JSON 配置、混合公私隐私边界、CLI 重算与 API 见 [同源组与严格重算](docs/lineage.md)。
 
@@ -119,8 +121,10 @@ Actions 将公开与私有计算分开。公开作业使用本仓库 `contents: 
 
 默认状态目录 `.poly-tally/` 已被 Git 忽略。
 
-- `stats.sqlite`：仓库状态、当前生效历史、文件指标清单、blob 解析缓存、最近运行摘要。
-- `objects/<仓库 ID>.git`：独立 bare 对象缓存；所有 fetch 发生在这里，不修改用户工作区。
+- `epochs/<批次>/stats.sqlite`：仓库状态、当前生效历史、文件指标清单和最近运行摘要。
+- `cache/<public|private>/parser.sqlite`：按内容、语言、统计器版本和大小上限索引的解析事实。
+- `cache/<public|private>/objects/<仓库 ID>.git`：独立 bare 对象缓存；所有 fetch 发生在这里，不修改用户工作区。
+- `--cache <根目录>` 可指定长期缓存位置，CLI 自动附加范围目录；不同批次共享同一缓存运行锁。
 - `run.lock`：操作系统文件锁，阻止同一目录并发运行；崩溃自动释放。
 - `web/data/stats.json`：公开字段白名单，完整生成后原子替换。
 
@@ -132,7 +136,7 @@ python -m poly_tally restore --backup /安全目录/poly-tally.sqlite
 python -m poly_tally export --refresh
 ```
 
-SQLite 备份保存全部已采集统计与解析缓存；还需单独备份状态目录中的 `objects/` 才能保证已删除仓库的未来规则重算能力。活跃仓库对象丢失后可以重新 fetch。
+SQLite backup 保存派生统计。还需在停止采集后单独备份 `cache/`（含解析事实和 Git 对象），才能保证已删除仓库未来离线重算。只恢复派生统计也能继续检查 HEAD；对象缺失时，有新提交的活动仓库可重新 fetch。旧 API 未指定独立缓存时，仍使用状态目录内的旧布局。
 
 列表缺失、403/404、超时不等于已删除。只有明确确认删除或决定永久停止跟踪后，才执行：
 

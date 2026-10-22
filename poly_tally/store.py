@@ -13,7 +13,7 @@ class 数据库_类:
     2026.10.21 - 仓库按稳定 ID 建账，不自动删除历史或对象缓存。
     """
 
-    def __init__(self, arg_目录: Path) -> None:
+    def __init__(self, arg_目录: Path, arg_缓存目录: Path | None = None) -> None:
         self.目录 = arg_目录
         arg_目录.mkdir(parents=True, exist_ok=True)
         self.连接 = sqlite3.connect(arg_目录 / "stats.sqlite")
@@ -24,6 +24,13 @@ class 数据库_类:
             CREATE TABLE IF NOT EXISTS runs(id INTEGER PRIMARY KEY, data TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS metadata(key TEXT PRIMARY KEY, value TEXT NOT NULL);
         """)
+        self.解析表 = "blobs"
+        if arg_缓存目录 is not None:
+            arg_缓存目录.mkdir(parents=True, exist_ok=True, mode=0o700)
+            self.连接.execute("ATTACH DATABASE ? AS facts", (str(arg_缓存目录 / "parser.sqlite"),))
+            self.连接.execute("PRAGMA facts.journal_mode=WAL")
+            self.连接.execute("CREATE TABLE IF NOT EXISTS facts.blobs(oid TEXT, context TEXT, version TEXT, metrics TEXT, PRIMARY KEY(oid,context,version))")
+            self.解析表 = "facts.blobs"
 
     def api_绑定批次(self, epoch: str, contract: str) -> None:
         if not epoch:
@@ -57,7 +64,7 @@ class 数据库_类:
         arg_上下文: str,
         arg_版本: str,
     ) -> tuple[bool, dict[str, int] | None]:
-        行 = self.连接.execute("SELECT metrics FROM blobs WHERE oid=? AND context=? AND version=?", (arg_OID, arg_上下文, arg_版本)).fetchone()
+        行 = self.连接.execute(f"SELECT metrics FROM {self.解析表} WHERE oid=? AND context=? AND version=?", (arg_OID, arg_上下文, arg_版本)).fetchone()
         return (True, json.loads(行[0])) if 行 else (False, None)
 
     def api_保存解析(
@@ -67,7 +74,7 @@ class 数据库_类:
         arg_版本: str,
         arg_指标: dict[str, int] | None,
     ) -> None:
-        self.连接.execute("INSERT OR REPLACE INTO blobs VALUES(?,?,?,?)", (arg_OID, arg_上下文, arg_版本, json.dumps(arg_指标)))
+        self.连接.execute(f"INSERT OR REPLACE INTO {self.解析表} VALUES(?,?,?,?)", (arg_OID, arg_上下文, arg_版本, json.dumps(arg_指标)))
 
     def api_记录运行(self, arg_记录: dict) -> None:
         with self.连接:

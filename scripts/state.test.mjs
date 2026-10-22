@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
-import {mkdtemp, readFile, writeFile, rm} from 'node:fs/promises';
+import {mkdtemp, readFile, writeFile, rm, mkdir} from 'node:fs/promises';
+import {execFileSync} from 'node:child_process';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'node:test';
@@ -165,15 +166,26 @@ test('fresh private epoch can replace legacy scope only alongside a completed cu
   await assert.rejects(run(t, 'save-private', currentPrivate, null, {'checkpoint.json': checkpoint, 'private-metrics.json': envelope}, {env: epochEnv, noPrivate: true}), /epoch/i);
 });
 
-test('deploy workflow uses the epoch restore decision to rebuild without partial/old cache state', async () => {
+test('deploy collection drops derived state on reset while reusing the separate public object cache', async t => {
   const workflow = await readFile(new URL('../.github/workflows/pages.yml', import.meta.url), 'utf8');
-  assert.match(workflow, /POLY_TALLY_DATASET_EPOCH: source-only-lineage-2026-10-21-v1/);
-  assert.match(workflow, /id: restore-state/);
-  assert.match(workflow, /RESET_REQUIRED: \$\{\{ steps\.restore-state\.outputs\.reset-required \}\}/);
-  assert.match(workflow, /state="\$RUNNER_TEMP\/public-reset"/);
-  assert.match(workflow, /partial=\(\)/);
-  assert.doesNotMatch(workflow, /--refresh --allow-partial > "\$RUNNER_TEMP\/private-collect.log"/);
-  assert.match(workflow, /tally-\$\{\{ env\.POLY_TALLY_DATASET_EPOCH \}\}/);
+  const step = workflow.split('- name: Collect public repositories')[1].split('      - name:')[0];
+  const script = step.split('        run: |\n')[1].split('\n').map(line => line.slice(10)).join('\n');
+  const root = await mkdtemp(join(tmpdir(), 'tally-workflow-'));
+  t.after(() => rm(root, {recursive: true, force: true}));
+  await mkdir(join(root, '.poly-tally'));
+  await writeFile(join(root, '.poly-tally/remote-checkpoint.json'), '{}');
+  for (const reset of ['true', 'false']) {
+    const capture = join(root, `args-${reset}`);
+    execFileSync('bash', ['-e', '-c', 'python() { printf "%s\\n" "$@" > "$CAPTURE"; }\n' + script], {
+      cwd: root, env: {...process.env, RESET_REQUIRED: reset, RUNNER_TEMP: root, CAPTURE: capture},
+    });
+    const args = (await readFile(capture, 'utf8')).trim().split('\n');
+    assert.equal(args[args.indexOf('--cache') + 1], '.poly-tally/cache');
+    assert.equal(args[args.indexOf('--state') + 1], reset === 'true' ? join(root, 'public-reset') : '.poly-tally');
+    assert.equal(args.includes('--allow-partial'), reset === 'false');
+    assert.equal(args.includes('--authoritative-checkpoint'), reset === 'false');
+    assert.ok(args.includes('--public-only'));
+  }
 });
 
 test('durable private publication rejects unproved lineage scans even if visible failures are zero', async t => {
@@ -213,13 +225,6 @@ test('external restore hard-rejects wrong SHA, missing blob, old epoch and unpro
   for (const candidate of [{...externalSnapshot,datasetEpoch:'old-epoch'},envelope,{...externalSnapshot,completeness:{...externalProof,complete:false}}]) {
     await assert.rejects(run(t,'restore',checkpoint,envelope,{'private-metrics.json':candidate},{env:{...epochEnv,POLY_TALLY_EXTERNAL_PRIVATE_BLOB_SHA:await externalSha(candidate)}}), /epoch|incomplete|lineage/i);
   }
-});
-
-test('external publication is an explicit dispatch SHA choice, never an automatic secret fallback', async () => {
-  const workflow = await readFile(new URL('../.github/workflows/pages.yml',import.meta.url),'utf8');
-  assert.match(workflow,/workflow_dispatch:\s+inputs:\s+external_private_blob_sha:/);
-  assert.match(workflow,/POLY_TALLY_EXTERNAL_PRIVATE_BLOB_SHA: \$\{\{ github.event_name == 'workflow_dispatch' && inputs.external_private_blob_sha \|\| '' \}\}/);
-  assert.match(workflow,/if \[ -n "\$POLY_TALLY_EXTERNAL_PRIVATE_BLOB_SHA" \]/);
 });
 
 test('external dispatch selection is scoped to restore/build, not inherited by unrelated fixture tests', async () => {

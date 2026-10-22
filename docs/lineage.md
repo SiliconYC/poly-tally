@@ -41,7 +41,7 @@
 
 ## 新 epoch 的完整性门槛
 
-当前新 epoch 为 `source-only-lineage-2026-10-21-v1`，配置和 Actions 一致。首次计算不能初始化于旧 SQLite/blob cache/对象目录；检查点必须 epoch 与 lineageVersion 同时匹配，SQLite restore 也必须契约一致。新 epoch 绝不接受旧 `retained-private-baseline` 作为成功输入。
+当前新 epoch 为 `source-only-lineage-2026-10-21-v1`，配置和 Actions 一致。派生统计首次计算不能初始化于旧 SQLite/检查点；检查点必须 epoch 与 lineageVersion 同时匹配，SQLite restore 也必须契约一致。CLI 独立缓存中的原始 Git 对象及版本化解析事实可以复用，但不能充当已完成统计；每次仍核对当前授权范围与默认分支。新 epoch 绝不接受旧 `retained-private-baseline` 作为成功输入。
 
 `completeness` 记录发现成功、预期源数、成功源数、缺成员数、失败数。`complete=true` 必须全部检查通过，组成员全部齐备、同规则、完整历史。没有运行证据的空输出不是成功。`validate --complete`、adopt、站点 build 和 durable state save 都拒绝未证明完整的私有输出；公开与私有作业证明分别保留，合并后的整体 complete 必须公开本轮完整，私有本轮完整或经过显式外部快照校验。若本次私有作业失败、取消、下载/采用失败或未配置权限，只可保留同 epoch 的上次完整规模；其成功证明移到 `publication.privateSnapshotCompleteness` 供溯源，本次 `privateCompleteness=null`、整体 `complete=false`，不能把旧成功证明当本次成功。合并证明中的计数是扫描任务数，跨作业重复扫描公开成员会重复计任务，不是统计项数。
 

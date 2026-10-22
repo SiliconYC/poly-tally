@@ -20,89 +20,12 @@ concurrency:
 permissions:
   contents: read
 
-# Bump only for an explicitly requested full baseline rebuild. No prior epoch
-# checkpoint/cache or retained private baseline may enter the new computation.
-# Missing private authorization keeps the new lineage epoch explicitly incomplete.
+# 统计批次只隔离派生状态；公开原始对象和解析事实可跨批次复用。
 env:
   POLY_TALLY_DATASET_EPOCH: source-only-lineage-2026-10-21-v1
 
 jobs:
-  private:
-    runs-on: ubuntu-latest
-    timeout-minutes: 180
-    outputs:
-      available: ${{ steps.scan.outputs.available || 'false' }}
-      status: ${{ steps.scan.outputs.status || 'not-configured' }}
-    steps:
-      - name: Detect optional read-only source credential
-        id: credential
-        env:
-          READ_TOKEN: ${{ secrets.POLY_TALLY_READ_TOKEN }}
-          POLY_TALLY_EXTERNAL_PRIVATE_BLOB_SHA: ${{ github.event_name == 'workflow_dispatch' && inputs.external_private_blob_sha || '' }}
-        run: |
-          if [ -n "$POLY_TALLY_EXTERNAL_PRIVATE_BLOB_SHA" ]; then
-            echo 'configured=false' >> "$GITHUB_OUTPUT"
-            echo 'Explicit external snapshot selected; exact bytes and current contracts will be verified before publication.'
-          elif [ -n "$READ_TOKEN" ]; then
-            echo 'configured=true' >> "$GITHUB_OUTPUT"
-          else
-            echo 'configured=false' >> "$GITHUB_OUTPUT"
-            echo 'No private source token; lineage rebuild remains incomplete. Old snapshots cannot enter this epoch.'
-          fi
-      - uses: actions/checkout@v4
-        if: steps.credential.outputs.configured == 'true'
-        with:
-          ref: dev
-          persist-credentials: false
-      - uses: actions/setup-python@v5
-        if: steps.credential.outputs.configured == 'true'
-        with:
-          python-version: '3.12'
-      - uses: actions/setup-node@v4
-        if: steps.credential.outputs.configured == 'true'
-        with:
-          node-version: '22'
-      - name: Install locked private collector dependencies
-        if: steps.credential.outputs.configured == 'true'
-        run: |
-          python -m pip install --require-hashes -r requirements.lock
-          python -m pip install --no-deps -e .
-      - name: Collect private repositories into ephemeral state
-        id: scan
-        if: steps.credential.outputs.configured == 'true'
-        env:
-          POLY_TALLY_TOKEN: ${{ secrets.POLY_TALLY_READ_TOKEN }}
-        run: |
-          umask 077
-          if python -m poly_tally collect --private-only --include-private-metrics \
-            --state "$RUNNER_TEMP/private-tally" \
-            --output "$RUNNER_TEMP/private-public-stats.json" \
-            --private-metrics-output "$RUNNER_TEMP/private-metrics.json" \
-            --refresh > "$RUNNER_TEMP/private-collect.log" 2>&1 \
-            && node scripts/metrics.mjs validate "$RUNNER_TEMP/private-metrics.json" --complete; then
-            echo 'available=true' >> "$GITHUB_OUTPUT"
-            echo 'status=available' >> "$GITHUB_OUTPUT"
-          else
-            echo 'available=false' >> "$GITHUB_OUTPUT"
-            echo 'status=stale' >> "$GITHUB_OUTPUT"
-            echo '::warning::Private collection incomplete; keep only a complete current-epoch snapshot. Lineage rebuild remains pending.'
-          fi
-      # 私有 Git 对象、SQLite、检查点和诊断日志不能进入 cache 或 artifact。
-      - name: Stage only the sanitized private snapshot
-        if: steps.scan.outputs.available == 'true'
-        uses: actions/upload-artifact@v4
-        with:
-          name: private-candidate
-          path: ${{ runner.temp }}/private-metrics.json
-          retention-days: 1
-          if-no-files-found: error
-      - name: Remove ephemeral private computation state
-        if: always() && steps.credential.outputs.configured == 'true'
-        run: rm -rf "$RUNNER_TEMP/private-tally" "$RUNNER_TEMP/private-public-stats.json" "$RUNNER_TEMP/private-collect.log" "$RUNNER_TEMP/private-metrics.json"
-
   collect:
-    needs: private
-    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     outputs:
@@ -131,23 +54,17 @@ jobs:
       - name: Restore optional public object and parser caches
         uses: actions/cache@v4
         with:
-          path: .poly-tally/epochs/${{ env.POLY_TALLY_DATASET_EPOCH }}
-          key: tally-${{ env.POLY_TALLY_DATASET_EPOCH }}-${{ runner.os }}-${{ github.run_id }}
-          restore-keys: tally-${{ env.POLY_TALLY_DATASET_EPOCH }}-${{ runner.os }}-
+          path: |
+            .poly-tally/cache/public
+            .poly-tally/epochs/${{ env.POLY_TALLY_DATASET_EPOCH }}
+          key: tally-public-native-v2-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: tally-public-native-v2-${{ runner.os }}-
       - name: Restore only current-epoch public checkpoint and sanitized private baseline
         id: restore-state
         env:
           GH_TOKEN: ${{ github.token }}
           POLY_TALLY_EXTERNAL_PRIVATE_BLOB_SHA: ${{ github.event_name == 'workflow_dispatch' && inputs.external_private_blob_sha || '' }}
         run: node scripts/state.mjs restore .poly-tally/remote-checkpoint.json web/data/private-metrics.json
-      - name: Download optional sanitized private candidate
-        id: candidate
-        if: needs.private.outputs.available == 'true'
-        continue-on-error: true
-        uses: actions/download-artifact@v4
-        with:
-          name: private-candidate
-          path: ${{ runner.temp }}/private-candidate
       - name: Collect public repositories from the current default branches
         env:
           RESET_REQUIRED: ${{ steps.restore-state.outputs.reset-required }}
@@ -157,7 +74,7 @@ jobs:
           partial=(--allow-partial)
           state=.poly-tally
           if [ "$RESET_REQUIRED" = 'true' ]; then
-            # Do not reuse even a same-epoch cache from a failed persistence attempt.
+            # 只丢弃派生统计，继续复用已授权公开对象和事实。
             state="$RUNNER_TEMP/public-reset"
             partial=()
           fi
@@ -165,25 +82,11 @@ jobs:
             restore=(--import-checkpoint .poly-tally/remote-checkpoint.json --authoritative-checkpoint)
             cp .poly-tally/remote-checkpoint.json .poly-tally/checkpoint.json
           fi
-          python -m poly_tally collect --public-only --refresh --state "$state" "${partial[@]}" --checkpoint .poly-tally/checkpoint.json "${restore[@]}"
-      - name: Adopt a complete private snapshot only when its scope is preserved
-        id: adopt
-        if: needs.private.outputs.available == 'true' && steps.candidate.outcome == 'success' && (github.event_name != 'workflow_dispatch' || inputs.external_private_blob_sha == '')
-        run: |
-          if node scripts/metrics.mjs adopt web/data/private-metrics.json "$RUNNER_TEMP/private-candidate/private-metrics.json" web/data/stats.json; then
-            echo 'status=available' >> "$GITHUB_OUTPUT"
-          else
-            echo 'status=stale' >> "$GITHUB_OUTPUT"
-            echo '::warning::Private snapshot rejected; retain the previous sanitized snapshot.'
-          fi
+          python -m poly_tally collect --public-only --refresh --state "$state" --cache .poly-tally/cache "${partial[@]}" --checkpoint .poly-tally/checkpoint.json "${restore[@]}"
       - name: Build dashboard with current-epoch metrics; leave incomplete rebuild visibly pending
         env:
           POLY_TALLY_EXTERNAL_PRIVATE_BLOB_SHA: ${{ github.event_name == 'workflow_dispatch' && inputs.external_private_blob_sha || '' }}
-          PRIVATE_JOB_RESULT: ${{ needs.private.result }}
-          PRIVATE_SCAN_STATUS: ${{ needs.private.outputs.status }}
-          PRIVATE_CANDIDATE_AVAILABLE: ${{ needs.private.outputs.available }}
-          PRIVATE_DOWNLOAD_OUTCOME: ${{ steps.candidate.outcome }}
-          PRIVATE_ADOPT_STATUS: ${{ steps.adopt.outputs.status }}
+          PRIVATE_SCAN_STATUS: not-configured
         run: POLY_TALLY_PRIVATE_STATUS="$(node scripts/metrics.mjs status)" node scripts/build-site.mjs
       - name: Detect sanitized state for durable publication
         id: private-state

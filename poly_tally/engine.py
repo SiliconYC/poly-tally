@@ -1,6 +1,7 @@
 # ◑ 导入
 from datetime import datetime, timezone
 from pathlib import Path
+import time
 
 from poly_tally.git import Git对象_类
 from poly_tally.metrics import 行统计_类
@@ -17,11 +18,18 @@ class 历史引擎_类:
     2026.10.21 - 增量树差异与独立全量回填共用同一统计契约。
     """
 
-    def __init__(self, arg_数据目录: Path, arg_规则: 规则_类) -> None:
+    def __init__(
+        self,
+        arg_数据目录: Path,
+        arg_规则: 规则_类,
+        arg_缓存目录: Path | None = None,
+    ) -> None:
         self.目录 = arg_数据目录
+        self.对象目录 = (arg_缓存目录 if arg_缓存目录 is not None else arg_数据目录) / "objects"
         self.规则 = arg_规则
-        self.数据库 = 数据库_类(arg_数据目录)
-        self.计数 = {"parsedBlobs": 0, "cacheHits": 0, "objectReads": 0, "recomputedCommits": 0, "skippedBlobs": 0}
+        self.数据库 = 数据库_类(arg_数据目录, arg_缓存目录)
+        self.计数 = {"parsedBlobs": 0, "cacheHits": 0, "objectReads": 0, "recomputedCommits": 0, "skippedBlobs": 0, "fetchedRepositories": 0, "unchangedRepositories": 0}
+        self.阶段耗时 = {"fetchSeconds": 0.0, "computeSeconds": 0.0, "parseSeconds": 0.0}
 
     def api_仓库列表(self) -> list[dict]:
         return self.数据库.api_仓库列表()
@@ -38,7 +46,14 @@ class 历史引擎_类:
         旧状态 = self.数据库.api_读取仓库(仓库ID)
         if arg_对象 is not None and arg_离线:
             raise ValueError("外部对象后端不能作为旧 Git 冷缓存使用")
-        对象 = arg_对象 if arg_对象 is not None else Git对象_类(self.目录 / "objects" / f"{仓库ID}.git")
+        # 只有调用方本轮已验证授权和默认分支 HEAD 时才跳过 fetch；离线重算仍校验对象。
+        if arg_对象 is None and not arg_离线 and arg_HEAD is not None and 旧状态 and 旧状态["historyComplete"] and 旧状态["head"] == arg_HEAD and 旧状态["branch"] == arg_元数据["default_branch"] and 旧状态["rulesVersion"] == self.规则.版本:
+            状态 = {**旧状态, **self._构建状态(arg_元数据, arg_HEAD, 旧状态), "history": 旧状态["history"], "inventory": 旧状态["inventory"], "skippedFiles": 旧状态["skippedFiles"]}
+            self.数据库.api_保存仓库(状态)
+            self.计数["unchangedRepositories"] += 1
+            return 状态
+        对象 = arg_对象 if arg_对象 is not None else Git对象_类(self._对象路径(仓库ID, arg_离线))
+        计算开始 = None
         try:
             if arg_离线:
                 if 旧状态 is None or 旧状态["head"] is None:
@@ -46,9 +61,16 @@ class 历史引擎_类:
                 HEAD = 旧状态["head"]
                 对象.api_命令("cat-file", "-e", f"{HEAD}^{{commit}}")
             else:
-                HEAD = 对象.api_更新(arg_源路径, arg_元数据["default_branch"])
+                获取开始 = time.perf_counter()
+                if arg_对象 is None:
+                    self.计数["fetchedRepositories"] += 1
+                try:
+                    HEAD = 对象.api_更新(arg_源路径, arg_元数据["default_branch"])
+                finally:
+                    self.阶段耗时["fetchSeconds"] += time.perf_counter() - 获取开始
             if arg_HEAD is not None and HEAD != arg_HEAD:
                 raise RuntimeError("默认分支在元数据读取与 fetch 之间变化，本轮保留旧结果，下轮重试")
+            计算开始 = time.perf_counter()
             状态 = self._构建状态(arg_元数据, HEAD, 旧状态)
             if arg_离线:
                 状态["status"] = "cold"
@@ -102,6 +124,8 @@ class 历史引擎_类:
             self.数据库.api_保存仓库(状态)
             return 状态
         finally:
+            if 计算开始 is not None:
+                self.阶段耗时["computeSeconds"] += time.perf_counter() - 计算开始
             对象.api_关闭()
 
     def _构建状态(
@@ -138,7 +162,9 @@ class 历史引擎_类:
         else:
             内容 = arg_对象.api_读取blob(arg_OID, self.规则.配置["max_blob_bytes"])
             self.计数["objectReads"] += 1
+            解析开始 = time.perf_counter()
             指标 = 行统计_类.api_解析(内容, 语言) if 内容 is not None else None
+            self.阶段耗时["parseSeconds"] += time.perf_counter() - 解析开始
             self.计数["parsedBlobs"] += 1
             self.数据库.api_保存解析(arg_OID, 语言, 解析版本, 指标)
         if 指标 is None:
@@ -168,11 +194,30 @@ class 历史引擎_类:
     def api_关闭(self) -> None:
         self.数据库.api_关闭()
 
+    def _对象路径(self, arg_ID: str, arg_离线: bool) -> Path:
+        路径 = self.对象目录 / f"{arg_ID}.git"
+        旧路径 = self.目录 / "objects" / f"{arg_ID}.git"
+        # 旧冷数据可能已无法从源站恢复，只在原位读取，避免把混合私有缓存复制到公开范围。
+        if arg_离线 and 旧路径 != 路径 and 旧路径.exists():
+            if not 路径.exists():
+                return 旧路径
+            状态 = self.数据库.api_读取仓库(arg_ID)
+            if 状态 is not None and 状态["head"] is not None:
+                对象 = Git对象_类(路径)
+                try:
+                    对象.api_命令("cat-file", "-e", f"{状态['head']}^{{commit}}")
+                except RuntimeError:
+                    # 失败 fetch 留下的空 bare 目录不能遮住仍完整的旧对象库。
+                    return 旧路径
+                finally:
+                    对象.api_关闭()
+        return 路径
+
     def api_重算冷数据(self, arg_ID: str) -> dict:
         状态 = self.数据库.api_读取仓库(arg_ID)
         if 状态 is None or 状态["status"] != "cold":
             raise ValueError("只能离线重算已确认的冷数据")
-        if not (self.目录 / "objects" / f"{arg_ID}.git").exists():
+        if not self._对象路径(arg_ID, True).exists():
             raise RuntimeError("冷数据原始对象不可用；保留原规则历史，不能伪称重算成功")
         元数据 = {"id": arg_ID, "full_name": 状态["name"], "default_branch": 状态["branch"], "private": 状态["private"], "archived": False}
         return self.api_同步(元数据, "", arg_离线=True)

@@ -76,6 +76,55 @@ class Test历史_类(unittest.TestCase):
         self.assertEqual(self.引擎.计数["parsedBlobs"], 3)
         self.assertEqual(状态["history"][-1]["metrics"]["code"], 2)
 
+    def test_新鲜HEAD无变化无需下载或读取对象(self) -> None:
+        首 = self._提交({"a.py": "x=1\n"})
+        之前 = self._同步()
+        self.源.rename(self.根 / "unavailable")
+        状态 = self.引擎.api_同步(self.元数据, str(self.源), 首)
+        self.assertEqual(状态["history"], 之前["history"])
+        self.assertEqual(self.引擎.计数["fetchedRepositories"], 1)
+        self.assertEqual(self.引擎.计数["unchangedRepositories"], 1)
+
+    def test_跨批次复用事实但从零重建统计(self) -> None:
+        self._提交({"a.py": "x=1\n", "doc.md": "guide\n"})
+        self._提交({"a.py": "x=1\ny=2\n"})
+        缓存 = self.根 / "cache"
+        首次 = 历史引擎_类(self.根 / "epoch-one", 规则_类(self.规则配置), 缓存)
+        try:
+            之前 = 首次.api_同步(self.元数据, str(self.源))
+        finally:
+            首次.api_关闭()
+        配置 = copy.deepcopy(self.规则配置)
+        配置["exclude"].append("*.md")
+        重建 = 历史引擎_类(self.根 / "epoch-two", 规则_类(配置), 缓存)
+        try:
+            self.assertEqual(重建.api_仓库列表(), [])
+            状态 = 重建.api_同步(self.元数据, str(self.源))
+            self.assertEqual([项["metrics"]["code"] for 项 in 状态["history"]], [1, 2])
+            self.assertEqual(状态["history"][-1]["metrics"]["documentation"], 0)
+            self.assertEqual(之前["history"][-1]["metrics"]["documentation"], 1)
+            self.assertEqual(重建.计数["recomputedCommits"], 2)
+            self.assertEqual(重建.计数["parsedBlobs"], 0)
+            self.assertTrue((缓存 / "objects/1.git").is_dir())
+            self.assertFalse((self.根 / "epoch-two/objects").exists())
+        finally:
+            重建.api_关闭()
+
+    def test_共享事实不跨大小限制或解析器版本复用(self) -> None:
+        self._提交({"a.py": "x=1\ny=2\n"})
+        缓存 = self.根 / "versioned-cache"
+        for 序号, (上限, 版本, 预期代码) in enumerate([(100, "parser-one", 2), (4, "parser-one", 0), (100, "parser-two", 2)]):
+            配置 = {**self.规则配置, "max_blob_bytes": 上限}
+            规则 = 规则_类(配置)
+            规则.统计器版本 = 版本
+            引擎 = 历史引擎_类(self.根 / f"version-{序号}", 规则, 缓存)
+            try:
+                状态 = 引擎.api_同步(self.元数据, str(self.源))
+                self.assertEqual(状态["history"][-1]["metrics"]["code"], 预期代码)
+                self.assertEqual(引擎.计数["parsedBlobs"], 1)
+            finally:
+                引擎.api_关闭()
+
     def test_改名改变分类与规则全历史重算(self) -> None:
         self._提交({"a.py": "# title\nx=1\n"})
         self._同步()
@@ -166,6 +215,23 @@ class Test历史_类(unittest.TestCase):
         self.assertEqual(新状态["status"], "cold")
         self.assertEqual(新状态["history"][-1]["metrics"]["code"], 0)
         self.assertEqual(新状态["history"][-1]["metrics"]["documentation"], 1)
+
+    def test_升级独立缓存仍能离线读取旧冷数据对象且不复制到公开缓存(self) -> None:
+        self._提交({"a.py": "x=1\n", "doc.md": "guide\n"})
+        状态 = self._同步()
+        状态["status"] = "cold"
+        self.引擎.数据库.api_保存仓库(状态)
+        配置 = {**self.规则配置, "exclude": ["*.py"]}
+        缓存 = self.根 / "cache/public"
+        新引擎 = 历史引擎_类(self.根 / "state", 规则_类(配置), 缓存)
+        self.addCleanup(新引擎.api_关闭)
+        self.源.rename(self.根 / "deleted")
+        新状态 = 新引擎.api_重算冷数据("1")
+        self.assertEqual(新状态["history"][-1]["metrics"]["code"], 0)
+        self.assertEqual(新状态["history"][-1]["metrics"]["documentation"], 1)
+        self.assertFalse((缓存 / "objects/1.git").exists())
+        subprocess.run(["git", "init", "--bare", str(缓存 / "objects/1.git")], check=True, capture_output=True)
+        self.assertEqual(新引擎.api_重算冷数据("1")["history"], 新状态["history"])
 
     def test_三个真实仓库按历史位置回填(self) -> None:
         for 序号 in range(1, 4):

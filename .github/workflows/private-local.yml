@@ -1,0 +1,46 @@
+name: Update private metrics on persistent runner
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '47 0,12 * * *'
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: poly-tally-private-local
+  cancel-in-progress: false
+
+jobs:
+  collect:
+    if: vars.POLY_TALLY_PRIVATE_RUNNER == 'enabled'
+    runs-on: [self-hosted, poly-tally-private]
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: dev
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install locked dependencies
+        run: |
+          python -m pip install --require-hashes -r requirements.lock
+          python -m pip install --no-deps -e .
+      # 此 runner 必须专用且受保护，不运行不可信 PR；私有状态不进入 Actions cache/artifact。
+      - name: Incremental private collection and sanitized publication
+        env:
+          GH_TOKEN: ${{ github.token }}
+          POLY_TALLY_TOKEN: ${{ secrets.POLY_TALLY_READ_TOKEN }}
+          POLY_TALLY_LOCAL_STATE: ${{ runner.tool_cache }}/poly-tally-private
+          POLY_TALLY_PYTHON: python
+        run: |
+          umask 077
+          test -n "$POLY_TALLY_TOKEN"
+          node scripts/update-local.mjs

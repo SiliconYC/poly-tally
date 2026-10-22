@@ -1,10 +1,12 @@
 # ◑ 导入
 import argparse
+from contextlib import ExitStack
 import json
 import os
 import re
 from pathlib import Path
 import sqlite3
+import time
 
 from poly_tally.collector import 采集器_类
 from poly_tally.credentials import 凭证_类
@@ -15,6 +17,7 @@ from poly_tally.private_metrics import 私有规模导出_类
 
 # ◕ 功能
 def 主入口() -> int:
+    开始 = time.perf_counter()
     参数器 = argparse.ArgumentParser(description="Poly Tally：只读采集、历史重算与静态发布")
     参数器.add_argument("command", choices=["collect", "export", "retire", "resume", "backup", "restore", "checkpoint"])
     参数器.add_argument("repository_id", nargs="?")
@@ -22,6 +25,8 @@ def 主入口() -> int:
     参数器.add_argument("--dataset-epoch", default=os.environ.get("POLY_TALLY_DATASET_EPOCH"), help="隔离重算批次；新批次使用独立状态且禁止导入旧检查点")
     参数器.add_argument("--expected-inventory", type=Path, help="本次重算的新鲜授权仓库元数据盘点；检测凭据缩小，不导入旧统计或改变自动发现")
     参数器.add_argument("--state", type=Path, default=Path(".poly-tally"))
+    参数器.add_argument("--cache", type=Path, help="跨批次保留的原始对象与解析事实根目录；自动隔离公开/私有范围")
+    参数器.add_argument("--report", type=Path, help="本地性能报告，含私有仓库诊断，不可直接公开")
     参数器.add_argument("--output", type=Path, default=Path("web/data/stats.json"))
     范围参数 = 参数器.add_mutually_exclusive_group()
     范围参数.add_argument("--public-only", action="store_true", help="仅发现和计算公开仓库")
@@ -37,6 +42,7 @@ def 主入口() -> int:
     参数器.add_argument("--backup", type=Path, help="SQLite 一致性备份或恢复文件")
     参数 = 参数器.parse_args()
     配置 = json.loads(参数.config.read_text(encoding="utf-8"))
+    参数.cache = (参数.cache or 参数.state / "cache") / ("public" if 参数.public_only else "private")
     参数.dataset_epoch = 参数.dataset_epoch or 配置.get("datasetEpoch")
     if 参数.dataset_epoch:
         if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,79}", 参数.dataset_epoch):
@@ -52,8 +58,13 @@ def 主入口() -> int:
     if 参数.command == "collect" and not 参数.public_only:
         参数.state.mkdir(parents=True, exist_ok=True, mode=0o700)
         参数.state.chmod(0o700)
-    with 运行锁_类(参数.state / "run.lock"):
-        采集器 = 采集器_类(配置, 参数.state, 令牌, 参数.public_only, 参数.private_only, 参数.dataset_epoch, json.loads(参数.expected_inventory.read_text()) if 参数.expected_inventory else None)
+    with ExitStack() as 锁栈:
+        参数.cache.mkdir(parents=True, exist_ok=True, mode=0o700)
+        参数.cache.chmod(0o700)
+        # 不同统计批次也会写同一事实库，锁必须覆盖共享缓存而非仅覆盖 epoch。
+        锁栈.enter_context(运行锁_类(参数.cache / "run.lock"))
+        锁栈.enter_context(运行锁_类(参数.state / "run.lock"))
+        采集器 = 采集器_类(配置, 参数.state, 令牌, 参数.public_only, 参数.private_only, 参数.dataset_epoch, json.loads(参数.expected_inventory.read_text()) if 参数.expected_inventory else None, 参数.cache)
         try:
             if 参数.import_checkpoint:
                 采集器.api_恢复检查点(参数.import_checkpoint, 参数.authoritative_checkpoint)
@@ -61,7 +72,7 @@ def 主入口() -> int:
             match 参数.command:
                 case "collect":
                     结果 = 采集器.api_采集()
-                    print("[完成] " + json.dumps({键: 值 for 键, 值 in 结果.items() if 键 != "publicRun"}, ensure_ascii=False), flush=True)
+                    print("[完成] " + json.dumps({键: 值 for 键, 值 in 结果.items() if 键 not in {"publicRun", "repositoryMeasurements"}}, ensure_ascii=False), flush=True)
                     返回码 = 1 if 结果["failed"] and not 参数.allow_partial else 0
                 case "retire" | "resume":
                     if 参数.repository_id is None:
@@ -92,6 +103,7 @@ def 主入口() -> int:
                             来源.backup(采集器.引擎.数据库.连接)
                 case "checkpoint" | "export":
                     pass
+            导出开始 = time.perf_counter()
             if 参数.checkpoint:
                 采集器.api_保存检查点(参数.checkpoint, True)
             if 参数.private_metrics_output:
@@ -100,6 +112,8 @@ def 主入口() -> int:
             if 参数.command != "backup":
                 已写入 = 公开导出_类(采集器.引擎.数据库, 采集器.规则, 参数.include_private_metrics).api_写入(参数.output, 参数.refresh)
                 print(f"[信息] 公开数据{'已更新' if 已写入 else '无统计变化'}：{参数.output}", flush=True)
+            if 参数.report and 参数.command == "collect":
+                公开导出_类.api_原子写入(参数.report, {"schemaVersion": 1, "collection": {键: 值 for 键, 值 in 结果.items() if 键 != "publicRun"}, "exportSeconds": round(time.perf_counter() - 导出开始, 6), "totalSeconds": round(time.perf_counter() - 开始, 6)})
             return 返回码
         finally:
             采集器.api_关闭()

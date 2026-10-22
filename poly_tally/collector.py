@@ -32,12 +32,13 @@ class 采集器_类:
         arg_仅私有: bool = False,
         arg_数据批次: str | None = None,
         arg_预期清单: dict | None = None,
+        arg_缓存目录: Path | None = None,
     ) -> None:
         self.配置 = arg_配置
         if not arg_配置["owners"]:
             raise ValueError("owners 至少包含一个账号或组织")
         self.规则 = 规则_类(arg_配置["rules"])
-        self.引擎 = 历史引擎_类(arg_目录, self.规则)
+        self.引擎 = 历史引擎_类(arg_目录, self.规则, arg_缓存目录)
         self.数据批次 = arg_数据批次
         self.引擎.数据库.数据批次 = arg_数据批次
         self.同源组 = validate_groups(arg_配置.get("lineageGroups", []))
@@ -58,6 +59,7 @@ class 采集器_类:
     def api_采集(self) -> dict:
         开始 = time.monotonic()
         基线 = self.引擎.计数.copy()
+        阶段总基线 = self.引擎.阶段耗时.copy()
         失败 = 0
         发现完整 = True
         缺成员 = 0
@@ -70,9 +72,13 @@ class 采集器_类:
         已扫描 = set()
         公开失败 = 0
         公开计数 = {键: 0 for 键 in 基线}
+        公开阶段 = {键: 0.0 for 键 in self.引擎.阶段耗时}
+        仓库测量 = []
         已见: set[str] = set()
         已知 = {仓库["id"]: 仓库 for 仓库 in self.引擎.api_仓库列表()}
         for 仓库 in 已知.values():
+            if self.仅公开 and 仓库["private"]:
+                continue
             if 仓库["status"] == "cold" and 仓库["rulesVersion"] != self.规则.版本:
                 try:
                     self.引擎.api_重算冷数据(仓库["id"])
@@ -80,6 +86,7 @@ class 采集器_类:
                     仓库["notice"] = "冷数据源码对象不可用，保留旧规则版本；已隔离出当前口径汇总"
                     self.引擎.数据库.api_保存仓库(仓库)
         已知 = {仓库["id"]: 仓库 for 仓库 in self.引擎.api_仓库列表()}
+        发现开始 = time.perf_counter()
         try:
             元数据表 = self.发现器.api_发现(self.配置["owners"])
         except (requests.RequestException, ValueError) as 异常:
@@ -91,6 +98,7 @@ class 采集器_类:
             公开失败 = max(1, sum(not 项["private"] for 项 in 已知.values()))
             元数据表 = []
             已见.update(已知)
+        发现耗时 = time.perf_counter() - 发现开始
         # Explicit groups must be complete, including archived/public members in
         # a private job. Public-only cannot prove private access and defers groups.
         if not self.仅公开:
@@ -127,6 +135,8 @@ class 采集器_类:
                 continue
             预期.add(ID)
             仓库基线 = self.引擎.计数.copy()
+            阶段基线 = self.引擎.阶段耗时.copy()
+            仓库开始 = time.perf_counter()
             try:
                 print(f"[开始] 扫描仓库 {元数据['full_name']}", flush=True)
                 HEAD = self.发现器.api_读取默认分支(元数据)
@@ -151,9 +161,12 @@ class 采集器_类:
                     公开失败 += 1
                 print(f"[警告] 仓库 {元数据['full_name']} 扫描失败，已保留最后成功结果", flush=True)
             finally:
+                仓库测量.append({"repository": 元数据["full_name"], "durationSeconds": round(time.perf_counter() - 仓库开始, 6), "success": ID in 已扫描, "counters": {键: self.引擎.计数[键] - 仓库基线[键] for 键 in 仓库基线}, "phases": {键: round(self.引擎.阶段耗时[键] - 阶段基线[键], 6) for 键 in 阶段基线}})
                 if not 元数据["private"]:
                     for 键 in 公开计数:
                         公开计数[键] += self.引擎.计数[键] - 仓库基线[键]
+                    for 键 in 公开阶段:
+                        公开阶段[键] += self.引擎.阶段耗时[键] - 阶段基线[键]
         for ID, 状态 in 已知.items():
             if self.仅私有 and not 状态["private"] and 状态["name"].casefold() not in self.成员名称:
                 continue
@@ -201,7 +214,8 @@ class 采集器_类:
                 公开失败 = max(公开失败, len(清单预期 - 已扫描))
         仓库表 = [项 for 项 in self.引擎.api_仓库列表() if 项["status"] != "archived"]
         公共运行 = {"finishedAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"), "durationSeconds": round(time.monotonic() - 开始, 3), "repositories": sum(not 项["private"] for 项 in 仓库表), "failed": 公开失败, **公开计数}
-        运行 = {**公共运行, "repositories": len(仓库表), "failed": 失败, **{键: self.引擎.计数[键] - 基线[键] for 键 in 基线}, "publicRun": 公共运行}
+        公共运行["phases"] = {键: round(值, 6) for 键, 值 in 公开阶段.items()}
+        运行 = {**公共运行, "repositories": len(仓库表), "failed": 失败, **{键: self.引擎.计数[键] - 基线[键] for 键 in 基线}, "publicRun": 公共运行, "phases": {"discoverySeconds": round(发现耗时, 6), **{键: round(值 - 阶段总基线[键], 6) for 键, 值 in self.引擎.阶段耗时.items()}}, "repositoryMeasurements": 仓库测量}
         if self.引擎.数据库.lineage_enabled:
             if not self.仅公开:
                 try:

@@ -1,0 +1,132 @@
+{
+  "measuredOn": "2026-10-22",
+  "platform": "macOS arm64, Python 3.12.13, Git native transport, Pygments 2.21.0",
+  "cold": {
+    "schemaVersion": 1,
+    "collection": {
+      "finishedAt": "2026-10-22T01:22:47.076698Z",
+      "durationSeconds": 538.189,
+      "repositories": 29,
+      "failed": 0,
+      "parsedBlobs": 67165,
+      "cacheHits": 16137,
+      "objectReads": 67165,
+      "recomputedCommits": 2589,
+      "skippedBlobs": 11,
+      "fetchedRepositories": 28,
+      "unchangedRepositories": 0,
+      "phases": {
+        "discoverySeconds": 2.098966,
+        "fetchSeconds": 167.071025,
+        "computeSeconds": 352.796839,
+        "parseSeconds": 302.922069
+      },
+      "completeness": {
+        "complete": true,
+        "discoveryComplete": true,
+        "expectedRepositories": 29,
+        "scannedRepositories": 29,
+        "missingMembers": 0,
+        "failed": 0
+      }
+    },
+    "exportSeconds": 0.747528,
+    "totalSeconds": 539.230069
+  },
+  "warm": {
+    "scenario": "fixed-input-raw-and-parser-present-stats-empty",
+    "equivalent": true,
+    "outputSha256": "2daa61af8c10fc637b90ee5db225e42a28e93b9af974007e5751c8ca598aa821",
+    "repositories": 34,
+    "commits": 2589,
+    "durationSeconds": 38.966869,
+    "peakRssPlatformUnits": 120324096,
+    "counters": {
+      "parsedBlobs": 0,
+      "cacheHits": 83302,
+      "objectReads": 0,
+      "recomputedCommits": 2589,
+      "skippedBlobs": 11,
+      "fetchedRepositories": 0,
+      "unchangedRepositories": 0
+    },
+    "phases": {
+      "fetchSeconds": 0.34525725199637236,
+      "computeSeconds": 38.34712370694615,
+      "parseSeconds": 0
+    },
+    "networkRequests": 0
+  },
+  "incremental": {
+    "schemaVersion": 1,
+    "collection": {
+      "finishedAt": "2026-10-22T01:25:53.549643Z",
+      "durationSeconds": 20.532,
+      "repositories": 29,
+      "failed": 0,
+      "parsedBlobs": 22,
+      "cacheHits": 0,
+      "objectReads": 22,
+      "recomputedCommits": 2,
+      "skippedBlobs": 0,
+      "fetchedRepositories": 2,
+      "unchangedRepositories": 26,
+      "phases": {
+        "discoverySeconds": 2.421542,
+        "fetchSeconds": 5.653542,
+        "computeSeconds": 0.51715,
+        "parseSeconds": 0.269808
+      },
+      "completeness": {
+        "complete": true,
+        "discoveryComplete": true,
+        "expectedRepositories": 29,
+        "scannedRepositories": 29,
+        "missingMembers": 0,
+        "failed": 0
+      }
+    },
+    "exportSeconds": 0.936247,
+    "totalSeconds": 21.839481
+  },
+  "caveats": [
+    "Cold run started with no source objects, parser facts or derived statistics in its new local root.",
+    "Warm replay used the exact cold-run Git inputs and checked every commit snapshot and file inventory, ignoring only lastSuccessAt.",
+    "Incremental run discovered real source changes after the cold input capture; this is not a fixed-input equivalence comparison.",
+    "parseSeconds is included in computeSeconds; warm fetchSeconds measures local object existence checks, not network.",
+    "Git pack bytes on disk are not network wire bytes; API request count and cold peak RSS were not captured.",
+    "Previous cloud connector observation was incomplete and ran elsewhere; no controlled speedup factor is claimed."
+  ],
+  "unchanged": {
+    "schemaVersion": 1,
+    "collection": {
+      "finishedAt": "2026-10-22T01:27:05.565568Z",
+      "durationSeconds": 13.625,
+      "repositories": 29,
+      "failed": 0,
+      "parsedBlobs": 0,
+      "cacheHits": 0,
+      "objectReads": 0,
+      "recomputedCommits": 0,
+      "skippedBlobs": 0,
+      "fetchedRepositories": 0,
+      "unchangedRepositories": 28,
+      "phases": {
+        "discoverySeconds": 2.137617,
+        "fetchSeconds": 0,
+        "computeSeconds": 0,
+        "parseSeconds": 0
+      },
+      "completeness": {
+        "complete": true,
+        "discoveryComplete": true,
+        "expectedRepositories": 29,
+        "scannedRepositories": 29,
+        "missingMembers": 0,
+        "failed": 0
+      }
+    },
+    "exportSeconds": 1.04999,
+    "totalSeconds": 15.087416
+  }
+}
