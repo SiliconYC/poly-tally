@@ -27,6 +27,7 @@
 `.gitignore` 不能改变历史 Git 树中的已跟踪文件，因此统计规则独立于各源仓库 `.gitignore`。所有公开、私有仓库使用同一口径：
 
 - 依赖、构建、缓存、工具状态、临时文件、压缩输出、lock 文件：按 `rules.exclude` 排除。
+- `Eigen` 依赖目录：通过 `**/[Ee][Ii][Gg][Ee][Nn]/**` 排除任意层级与大小写，源码和测试保护不能覆盖；名称含 `eigen` 的普通算法源码仍保留。
 - 日志/结果目录和报告名称等歧义规则：由 `artifact_exclude` 过滤，源码和手写文档上下文可由 `source_preserve` 保护，但不能覆盖上述硬排除。
 - 仍被纳入的代码/文档：继续排除明确生成器头、React 分发头、Sphinx 导航特征及重复运行日志。普通源码字符串、日志教程等不因此误删。
 - Git LFS 指针、symlink、submodule、二进制、非 UTF-8 与超限 blob 不纳入；不下载 LFS、不递归 submodule。
@@ -35,7 +36,9 @@
 
 ## 重新计算与数据清零
 
-新批次为 `source-only-lineage-2026-10-21-v1`。规则摘要包含新增配置，旧规则 hash 不再相同。全量重算必须从新状态读取当前默认分支历史，不混入任何旧 epoch 检查点、对象/解析缓存或 retained 私有规模。
+当前批次为 `source-only-no-eigen-2026-10-22-v1`。规则摘要包含新增配置，旧规则 hash 不再相同。全量重算使用新的派生状态，不混入旧批次检查点、历史汇总或 retained 私有规模；完整原始对象与适用的解析事实可以跨批次复用。
+
+已有本地缓存可先按已知 HEAD [完全离线重算](offline-rebuild.md)，不再从 GitHub 下载历史。离线结果保持原采集时间，并标记尚未重新发现；正常发布前再核对授权范围与当前默认分支 HEAD。聚合 JSON 本身不含足够的历史路径事实，不能可靠地从每个时间点直接扣除一个固定行数。
 
 当前活动 `web/data/stats.json` 已重置为**尚未采集的空基线**：`repositories=[]`、`completeness.complete=false`、`privateStatus=pending-rebuild`。空基线的零不是已验证的真实规模；旧活动 private/retained 统计文件撤下，Git 历史仍可恢复。没有删除任何源仓库文件或项目配置。
 

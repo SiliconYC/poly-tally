@@ -22,7 +22,7 @@ permissions:
 
 # 统计批次只隔离派生状态；公开原始对象和解析事实可跨批次复用。
 env:
-  POLY_TALLY_DATASET_EPOCH: source-only-lineage-2026-10-21-v1
+  POLY_TALLY_DATASET_EPOCH: source-only-no-eigen-2026-10-22-v1
 
 jobs:
   collect:

@@ -17,7 +17,7 @@ def configuration():
 
 def test_reviewable_config_excludes_data_categories_and_uses_new_epoch():
     config = configuration()
-    assert config['datasetEpoch'] == 'source-only-lineage-2026-10-21-v1'
+    assert config['datasetEpoch'] == 'source-only-no-eigen-2026-10-22-v1'
     assert config['rules'].get('exclude_extensions') == ['.json', '.jsonc', '.yaml', '.yml', '.xml']
     assert config['rules'].get('exclude_languages') == ['JSON', 'YAML', 'XML']
 

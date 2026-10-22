@@ -225,7 +225,7 @@ def test_rebuild_config_sets_explicit_confirmed_group_only():
     import json
     from pathlib import Path
     actual = json.loads(Path('config.json').read_text())
-    assert actual.get('datasetEpoch') == 'source-only-lineage-2026-10-21-v1'
+    assert actual.get('datasetEpoch') == 'source-only-no-eigen-2026-10-22-v1'
     assert actual.get('lineageGroups') == [{'id': 'vitro', 'members': ['SiliconYC/vitro', 'SiliconYC/vitro_zero_lab', 'SiliconYC/vitro_union_lab']}]
 
 

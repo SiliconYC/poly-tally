@@ -11,6 +11,7 @@ from poly_tally.engine import 历史引擎_类
 from poly_tally.export import 公开导出_类
 from poly_tally.github import GitHub发现器_类
 from poly_tally.rules import 规则_类
+from poly_tally.rebuild import 离线重算器_类
 from poly_tally.lineage import validate_groups, member_names, lineage_version, collapse_repositories
 
 
@@ -21,6 +22,7 @@ class 采集器_类:
 
     更新日志：
     2026.10.21 - 缺失不等于删除，只有显式归档产生永久冷数据。
+    2026.10.22 - 支持从本地已知 HEAD 离线重算新规则批次。
     """
 
     def __init__(
@@ -228,6 +230,9 @@ class 采集器_类:
             公共运行["completeness"] = {**完整性, "complete": 发现完整 and 公开失败 == 0, "expectedRepositories": sum(not item["private"] and item["id"] in 预期 for item in 仓库表), "scannedRepositories": sum(not item["private"] and item["id"] in 已扫描 for item in 仓库表), "missingMembers": 0, "failed": 公开失败}
         self.引擎.数据库.api_记录运行(运行)
         return 运行
+
+    def api_离线重算(self, arg_来源目录: Path) -> dict:
+        return 离线重算器_类(self).api_运行(arg_来源目录)
 
     @staticmethod
     def _校验预期清单(inventory: dict) -> list[dict]:

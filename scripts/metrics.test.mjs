@@ -297,7 +297,7 @@ test('source-only reset ships no old private fallback or retained statistics', a
   const config = JSON.parse(await readFile(new URL('../config.json', import.meta.url), 'utf8'));
   const data = JSON.parse(await readFile(new URL('../web/data/stats.json', import.meta.url), 'utf8'));
   assert.equal(data.datasetEpoch, config.datasetEpoch);
-  assert.equal(data.datasetEpoch, 'source-only-lineage-2026-10-21-v1');
+  assert.equal(data.datasetEpoch, 'source-only-no-eigen-2026-10-22-v1');
   assert.deepEqual(data.repositories, []);
   assert.equal(data.summary.code, 0);
   assert.equal(data.summary.files, 0);

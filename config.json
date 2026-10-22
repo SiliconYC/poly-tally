@@ -1,5 +1,5 @@
 {
-  "datasetEpoch": "source-only-lineage-2026-10-21-v1",
+  "datasetEpoch": "source-only-no-eigen-2026-10-22-v1",
   "display": {
     "historyStart": "2025-01-17T00:00:00+08:00"
   },
@@ -33,6 +33,7 @@
       "**/vendor/**",
       "**/third_party/**",
       "**/third-party/**",
+      "**/[Ee][Ii][Gg][Ee][Nn]/**",
       "**/site-packages/**",
       "**/.git/**",
       "**/.venv/**",

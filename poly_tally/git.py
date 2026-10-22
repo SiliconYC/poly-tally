@@ -62,7 +62,7 @@ class Git对象_类:
 
     def api_读取blob(self, arg_OID: str, arg_上限: int) -> bytes | None:
         if self.批进程 is None:
-            self.批进程 = subprocess.Popen(["git", "--git-dir", str(self.路径), "cat-file", "--batch"], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+            self.批进程 = subprocess.Popen(["git", "--git-dir", str(self.路径), "cat-file", "--batch"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, env=self.环境)
         输入, 输出 = self.批进程.stdin, self.批进程.stdout
         if 输入 is None or 输出 is None:
             raise RuntimeError("Git blob 管道未初始化")
@@ -93,3 +93,43 @@ class Git对象_类:
             self.批进程.wait(timeout=10)
             if self.批进程.stdout is not None:
                 self.批进程.stdout.close()
+
+
+class 缓存对象_类(Git对象_类):
+    """
+    固定已采集 HEAD 的离线对象后端，不创建缺失缓存，也不更新远端引用。
+
+    更新日志：
+    2026.10.22 - 为规则重算提供禁止 fetch 和浅历史的生产入口。
+    """
+
+    def __init__(
+        self,
+        arg_路径: Path,
+        arg_HEAD: str,
+        arg_备用路径: Path | None = None,
+    ) -> None:
+        if not arg_路径.is_dir() and arg_备用路径 is not None and arg_备用路径.is_dir():
+            arg_路径, arg_备用路径 = arg_备用路径, None
+        if not arg_路径.is_dir():
+            raise RuntimeError("原始 Git 对象目录缺失；请恢复对象备份，离线重算不会联网补齐")
+        super().__init__(arg_路径)
+        # 部分克隆的 Git 可能隐式 lazy fetch；缺失对象必须在本地明确失败。
+        self.环境["GIT_NO_LAZY_FETCH"] = "1"
+        # 本机 Apple Git 2.39 不识别 NO_LAZY_FETCH；运输层空白名单跨版本禁止所有协议。
+        self.环境["GIT_ALLOW_PROTOCOL"] = ""
+        self.固定HEAD = arg_HEAD
+        self.备用路径 = arg_备用路径
+
+    def api_更新(self, arg_源: str, arg_分支: str) -> str:
+        try:
+            if self.api_命令("rev-parse", "--is-shallow-repository").strip() != b"false":
+                raise RuntimeError("对象缓存为浅仓库，不能离线重算完整历史")
+            self.api_命令("cat-file", "-e", f"{self.固定HEAD}^{{commit}}")
+        except RuntimeError:
+            if self.备用路径 is None or self.备用路径 == self.路径 or not self.备用路径.is_dir():
+                raise
+            # 升级布局时失败 fetch 可能留下空 bare；完整旧缓存仍是可恢复来源。
+            self.路径, self.备用路径 = self.备用路径, None
+            return self.api_更新(arg_源, arg_分支)
+        return self.固定HEAD

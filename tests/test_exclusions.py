@@ -64,6 +64,18 @@ class 收录边界测试_类(unittest.TestCase):
             with self.subTest(路径=路径):
                 self.assertEqual(self.规则.api_语言(路径), 语言)
 
+    def test_Eigen目录全局排除且不误伤自有算法(self) -> None:
+        for 路径 in (
+            "Eigen/Core.h", "eigen/src/Core/Matrix.h", "EIGEN/README.md",
+            "src/Eigen/src/Core/Matrix.h", "tests/fixtures/eIgEn/Matrix.cpp",
+            "G_套件/二维点集加权直线拟合/Eigen/src/Cholesky/LLT.h",
+        ):
+            with self.subTest(路径=路径):
+                self.assertIsNone(self.规则.api_语言(路径))
+        for 路径 in ("src/eigen_solver.cpp", "src/EigenSolver/Matrix.cpp", "docs/eigen.md"):
+            with self.subTest(路径=路径):
+                self.assertIsNotNone(self.规则.api_语言(路径))
+
     def test_外部导航片段不因换目录而伪装成自写HTML(self) -> None:
         内容 = '<div class="sidebar-tree">\n' + '\n'.join(
             f'<li class="toctree-l1"><a class="reference internal" href="bpy.{序号}.html">API</a></li>'
