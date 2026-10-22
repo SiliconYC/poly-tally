@@ -16,7 +16,7 @@
 - 新仓库完整回填历史，不把已有代码量全部记作发现当天新增。
 - 修改排除、分类规则后重算历史；切换默认分支、回退或重写历史后撤销失效快照。
 - 各仓库独立采集，以历史时点的最后一个提交树汇总，无需同时扫描多个目录。
-- 页面提供按仓库堆叠的交互面积图、语言环形饼图、六项分类概览和月度净变化；支持时间刷选、仓库与语言筛选，以及列表搜索、排序和 CSV 导出。
+- 页面提供按仓库堆叠的交互面积图、语言与仓库构成环形图、六项分类概览和日／周／月净变化；支持时间刷选、仓库与语言筛选，以及列表搜索、排序、名称复制和 CSV 导出。
 
 这里统计的是排除可识别依赖与产物后的代码存量；不推断所有源码的作者，不是累计新增量或生产力评分。跨仓库相同源码不自动去重，真实批量导入仍会产生跃升。
 
@@ -38,26 +38,31 @@
 
 此配置只作用于网页构建，不参与采集规则、`datasetEpoch` 或缓存键。完整历史仍保留在本地及 `tally-state`，站点构建读取原始输入后生成展示范围。起点前最后一次已知存量会延续到起点，不丢弃此前积累的代码；起点前的时间点不进入图表、周期净变化、历史面积排序或可见快照计数。没有起点前观测的仓库仍保持期初未知，不用零值假造新增。边界显示点不是新提交，仓库真实更新时间不变。
 
-修改该值后重新构建、发布网页即可，不需要重新采集或重算历史。改为更早的日期也能从完整输入恢复对应显示；删除 `display.historyStart` 可恢复不限制起点的展示。本地已备有完整公开统计和脱敏私有快照时，直接运行 `node scripts/build-site.mjs`；GitHub Pages 正常发布流程会自动读取配置。可见快照计数包含为延续存量生成的边界显示点，运行日志中的实际解析/提交计数保持原义。
+修改该值后重新构建、发布网页即可，不需要重新采集或重算历史。改为更早的日期也能从完整输入恢复对应显示；删除 `display.historyStart` 可恢复不限制起点的展示。本地已安装前端依赖，并备有完整公开统计和脱敏私有快照时，运行 `npm run build`；GitHub Pages 正常发布流程会自动读取配置。可见快照计数包含为延续存量生成的边界显示点，运行日志中的实际解析/提交计数保持原义。
 
 ## 快速运行
 
-需要 Python 3.12+、Git 和 Node.js 22+。Node.js 用于测试与打包静态文件，无需 npm 依赖。
+需要 Python 3.12+、Git 和 Node.js 22.12+。前端使用 React、TypeScript、Vite 和 Tailwind CSS；界面基于本地 shadcn/ui 组件，图表使用 shadcn/ui Chart 与 Recharts。
 
 ```bash
 python3.12 -m venv .venv
 source .venv/bin/activate
 python -m pip install --require-hashes -r requirements.lock
 python -m pip install --no-deps -e .
+npm ci
 python -m pytest -q
-node --test web/*.test.mjs
-node --test scripts/*.test.mjs
-python -m poly_tally collect --public-only
-node scripts/build-site.mjs
-python -m http.server 4187 --bind 127.0.0.1 --directory site
+npm run typecheck
+npm test
+npm run test:legacy
+npm run build
+npm run preview -- --port 4187
 ```
 
-打开本地 `http://127.0.0.1:4187/`。首次回填可能较慢；后续运行复用 blob 解析与历史前缀。本轮授权元数据确认 HEAD、分支、规则不变时，Git fetch、文件解析、对象读取和重算提交数均为零。
+打开本地 `http://127.0.0.1:4187/poly-tally/`。`npm run build` 先验证并合并公开统计与可选脱敏私有快照，再裁剪展示窗口、运行 Vite，并写入 `site/data/stats.json`。构建结果只含静态资源和可发布数据，不复制源文件或独立私有快照。
+
+仅开发界面时运行 `npm run dev`，打开终端提示地址下的 `/poly-tally/`。开发服务器从 `web/` 提供源码和现有 `web/data/stats.json`，不会执行私有合并或展示窗口构建；仓库保留空 pending 基线，便于检查加载与空态。真实数据验收应把完整测试工作目录和快照暂存在 `/tmp/`，使用同一构建入口生成临时站点，随后预览；不要将实际统计替换并提交到 `dev` 的基线。
+
+需要采集公开数据时运行 `python -m poly_tally collect --public-only`，默认更新 `web/data/stats.json`。首次回填可能较慢；后续运行复用 blob 解析与历史前缀。本轮授权元数据确认 HEAD、分支、规则不变时，Git fetch、文件解析、对象读取和重算提交数均为零。
 
 运行摘要包含 `parsedBlobs`、`objectReads`、`cacheHits`、`recomputedCommits`、`skippedBlobs`、失败仓库数与耗时。部分失败默认返回非零退出码，同时导出完整的最后成功版本；`--allow-partial` 允许带明确失败状态发布。
 
@@ -189,7 +194,7 @@ python -m poly_tally collect --public-only --import-checkpoint /备份目录/che
 
 仓库设置的 Pages 发布来源为 **GitHub Actions**，默认开发分支为 `dev`。仓库公开本身不会自动部署页面。
 
-`.github/workflows/pages.yml` 依次运行 Python / Node 测试、恢复状态、采集、保存公开检查点、上传并部署静态页面。前端没有运行时 CDN 依赖，所有链接和数据请求都支持 `/poly-tally/` 项目路径。
+`.github/workflows/pages.yml` 先安装锁定的 Python 与 npm 依赖，执行类型检查、React 测试及原有 Python / Node 测试，再恢复状态、采集、安全合并数据、构建、保存公开检查点并部署 `site/`。Vite 固定使用 `/poly-tally/` 项目路径，资源带内容 hash；前端没有运行时 CDN 依赖。`publicDir: false` 禁止整目录复制公开资源，最终数据由 `scripts/build-site.mjs` 在校验后单独写入。
 
 `web/data/stats.json` 当前是本次重置后的空 pending 基线；实际计算后才可生成同 epoch 的脱敏 `private-metrics.json`。旧 retained 过渡仅属于历史版本，本次 source-only 重算禁止采用。后续优先从持久数据分支及本轮作业取得完整新规模，无需反复向 `dev` 提交统计。`--refresh` 刷新产物时间，私有更新时间单独显示。`dev` 保存代码，`tally-state` 保存可公开采集状态。
 
@@ -197,12 +202,18 @@ python -m poly_tally collect --public-only --import-checkpoint /备份目录/che
 
 ```bash
 python -m pytest -q
-node --test web/*.test.mjs
+npm ci
+npm run typecheck
+npm test
+npm run test:legacy
 python -m poly_tally collect --public-only
 python -m poly_tally collect --public-only
-node scripts/build-site.mjs
+npm run build
+npm run preview -- --port 4187
 ```
 
 第二次无变化采集应报告 `parsedBlobs=0`、`objectReads=0`、`recomputedCommits=0`。真实 Git fixture 覆盖新增、修改、删除、改名、合并、revert、分支切换/改名、祖先回退、分叉和无公共历史、倒序时间、规则重算与冷数据离线重算。发现与运维测试覆盖分页、组织/私有范围、身份稳定、限流、权限故障、事务恢复、公开隐私和锁；Node 测试覆盖三仓库时间对齐、同刻覆盖、筛选、旧规则隔离与空态。
 
-实现边界与数据协议见 [数据与模块](docs/architecture.md)。两个 Qt 参考项目的功能分析、迁移取舍和新版图表操作见 [仪表盘升级说明](docs/dashboard-upgrade.md)。
+浏览器测试入口为 `npm run test:e2e`，性能测量入口为 `npm run bench`；运行前按对应测试配置准备浏览器和数据，实际结果以当次输出为准。真实数据测试仍在 `/tmp/` 临时工作目录进行，不提交实际统计。
+
+实现边界与数据协议见 [数据与模块](docs/architecture.md)。两个 Qt 参考项目的功能分析、React 迁移取舍和新版图表操作见 [仪表盘升级说明](docs/dashboard-upgrade.md)。

@@ -16,14 +16,32 @@
 | `poly_tally/credentials.py` | 显式读取环境令牌或本地 Git credential helper |
 | `poly_tally/lock.py` | POSIX 进程锁，支持 macOS / Linux |
 | `poly_tally/__main__.py` | 手动和定时任务共用命令入口 |
-| `web/model.mjs` | 统一时间轴、过滤与浏览器数据校验 |
-| `web/app.mjs` | 全局筛选、概览卡片与仓库表交互 |
-| `web/stacked-chart.mjs` | 按仓库堆叠面积、图例、快照明细与时间刷选 |
-| `web/language-chart.mjs` | 语言环形饼图与可筛选明细 |
-| `web/insights.mjs` | 可比仓库月度净变化与列表 CSV 导出 |
-| `web/chart-utils.mjs` | 图表 DOM、格式与配色 |
+| `web/model.mjs` | 统一时间轴、筛选、阶梯存量、同源组选择与浏览器数据校验 |
+| `web/insights.mjs` | 复用日／周／月可比净变化与 CSV 序列化函数 |
+| `web/src/app.tsx` | 数据加载、全局筛选状态、六项概览和各视图组合 |
+| `web/src/lib/` | TypeScript 数据契约、展示适配、告警、格式与安全链接 |
+| `web/src/components/` | 历史趋势、规模构成、周期变化及仓库列表 |
+| `web/src/components/ui/` | 来自官方 registry 的 shadcn/ui 基础组件与 Chart 容器 |
+| `vite.config.ts` | React / Tailwind 构建、路径别名、测试环境与 Pages 基路径 |
+| `scripts/build-site.mjs` | 完整输入校验、私有合并、展示窗口、Vite 构建与安全数据输出 |
 | `scripts/state.mjs` | 本项目专用 `tally-state` 分支持久化，不接触源仓库 |
 | `scripts/metrics.mjs` | 私有公开快照严格校验、范围保护与混合数据合并 |
+
+## 前端状态与迁移边界
+
+页面由 React 与 TypeScript 渲染，使用 Tailwind CSS 和本地 shadcn/ui 组件。`components.json` 采用 `new-york` 风格，基础组件与 Chart 源码取自 shadcn/ui 官方 `new-york-v4` registry；源码随项目维护，不依赖运行时 CDN。图表采用 shadcn/ui Chart 容器和 Recharts，不需要 Tremor。
+
+`App` 统一持有仓库选择、公开／私有范围、当前／档案模式、过期快照开关、语言和指标等全局筛选，并通过 `props` 与回调驱动各视图。时间范围也通过受控值协调趋势刷选与周期选择。图表内部只保留图例显隐、绝对值／占比、悬停或固定快照、构成维度与排序、净变化指标与周期等局部交互状态；隐藏趋势图层不会改写概览和列表使用的仓库集合。
+
+`web/model.mjs` 的纯数据逻辑和 `web/insights.mjs` 的纯计算导出渐进保留，由 TypeScript 适配层直接调用。React 层不重新实现同源组、未知期初、规则隔离、阶梯延续或 CSV 安全转义。既有 `.mjs` 测试继续保护这些口径，React 测试验证筛选和交互连接。旧原生 DOM / SVG 渲染文件及其实现绑定测试已经删除；交互改由 React 组件测试和真实浏览器测试覆盖，历史版本仍可从 Git 查阅。
+
+## 前端构建与静态数据
+
+Vite 的源码根目录是 `web/`，产物目录是 `site/`，固定 `base: '/poly-tally/'`。开发用 `npm run dev`，生产用 `npm run build` 与 `npm run preview`。`publicDir: false` 关闭公共目录的自动复制；开发服务器仍会直接响应 `web/` 下的源文件，因此开发模式只使用仓库的公开空基线，不把它当作脱敏发布边界。
+
+生产入口 `scripts/build-site.mjs` 先验证公开数据、可选私有快照、显式外部 blob 选择和 retained 基线约束，再合并完整事实并调用 `applyDisplayWindow`。这些检查失败时，已有站点不会被替换。随后真实调用 Vite，只打包入口可达的模块与内容 hash 资源；构建完成后单独写入 `site/data/stats.json`、favicon 和 `.nojekyll`。不发布独立 `private-metrics.json`、retained 文件、测试源码或嵌套预览。
+
+浏览器仅请求 `/poly-tally/data/stats.json`，不访问 GitHub API 或原始私有状态。`npm run dev` 不执行上述合并与窗口处理；需要检查实际发布结果时，应在 `/tmp/` 暂存完整测试工作目录与快照，执行同一生产构建并预览。真实数据与临时产物不提交到 `dev`，源仓库保留 pending 基线。
 
 ## 版本与缓存
 

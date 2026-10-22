@@ -45,12 +45,19 @@ jobs:
           node-version: '22'
       - name: Install locked dependencies
         run: |
+          npm ci
           python -m pip install --require-hashes -r requirements.lock
           python -m pip install --no-deps -e .
       - name: Verify collector and dashboard
         run: |
+          npm run typecheck
+          npm test
           python -m pytest -q
           node --test scripts/*.test.mjs web/*.test.mjs
+      - name: Verify production dashboard in Chromium
+        run: |
+          npx playwright install --with-deps chromium
+          npm run test:e2e
       - name: Restore optional public object and parser caches
         uses: actions/cache@v4
         with:

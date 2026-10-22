@@ -1,0 +1,68 @@
+{
+  "environment": {
+    "node": "v22.20.0",
+    "platform": "darwin",
+    "arch": "arm64"
+  },
+  "generatedAt": "2026-10-22T03:18:56.753Z",
+  "reports": [
+    {
+      "name": "distinct",
+      "repositories": 20,
+      "snapshots": 10000,
+      "alignedPoints": 10000,
+      "renderPoints": 10000,
+      "measurements": [
+        {
+          "name": "stackedHistory",
+          "ms": 17.26
+        },
+        {
+          "name": "chartRows",
+          "ms": 92.81
+        },
+        {
+          "name": "latestTotals",
+          "ms": 2.77
+        },
+        {
+          "name": "periodChanges",
+          "ms": 12.39
+        },
+        {
+          "name": "stockChange",
+          "ms": 2.02
+        }
+      ]
+    },
+    {
+      "name": "repeated",
+      "repositories": 40,
+      "snapshots": 100000,
+      "alignedPoints": 100000,
+      "renderPoints": 1001,
+      "measurements": [
+        {
+          "name": "stackedHistory",
+          "ms": 179.56
+        },
+        {
+          "name": "chartRows",
+          "ms": 26.04
+        },
+        {
+          "name": "latestTotals",
+          "ms": 18.21
+        },
+        {
+          "name": "periodChanges",
+          "ms": 254.67
+        },
+        {
+          "name": "stockChange",
+          "ms": 20.39
+        }
+      ]
+    }
+  ]
+}

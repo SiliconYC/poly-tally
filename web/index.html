@@ -1,70 +1,16 @@
 <!doctype html>
 <html lang="zh-CN">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#f5f5f0">
-  <meta name="description" content="Poly Tally：跨仓库、统一规则的代码规模与存量趋势。">
-  <title>Poly Tally · 代码规模</title>
-  <link rel="icon" href="./favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="./styles.css">
-  <script type="module" src="./app.mjs"></script>
-</head>
-<body>
-  <a class="skip-link" href="#main">跳转到统计内容</a>
-  <header class="site-header">
-    <h1><a class="brand" href="./"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>Poly Tally</a></h1>
-    <div class="update-box"><span id="updated-at">正在读取数据</span><button id="refresh" class="icon-button" aria-label="重新加载统计数据" title="重新加载"><svg class="control-icon" aria-hidden="true" focusable="false" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 9"/><path d="M21 3v6h-6"/></svg></button></div>
-  </header>
-  <main id="main">
-    <section id="load-state" class="state-panel" aria-live="polite"><span class="loader" aria-hidden="true"></span><h2>正在读取代码历史</h2></section>
-    <div id="dashboard" hidden>
-      <div class="filters" aria-label="统计筛选">
-        <details class="repository-picker" id="repository-picker"><summary><span id="repository-label">全部仓库</span><svg class="control-icon control-chevron" aria-hidden="true" focusable="false" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></summary><div class="repository-menu"><label class="sr-only" for="repository-search">搜索仓库名称</label><input id="repository-search" type="search" placeholder="搜索仓库名称…" autocomplete="off"><div class="picker-toolbar"><label class="sr-only" for="repository-sort">仓库列表排序</label><span class="select-control"><select id="repository-sort"><option value="name-asc">名称 A → Z</option><option value="name-desc">名称 Z → A</option><option value="metric-desc">规模 大 → 小</option><option value="metric-asc">规模 小 → 大</option></select><svg class="control-icon control-chevron" aria-hidden="true" focusable="false" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></span><button id="select-all">全选</button><button id="select-none">清空</button></div><div id="repository-options"></div></div></details>
-        <label><span class="sr-only">统计指标</span><span class="select-control"><select id="metric"><option value="code">代码行</option><option value="total">总行数</option><option value="comment">注释行</option><option value="blank">空行</option><option value="documentation">文档行</option><option value="files">文件数</option></select><svg class="control-icon control-chevron" aria-hidden="true" focusable="false" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></span></label>
-        <label><span class="sr-only">时间范围</span><span class="select-control"><select id="period"><option value="all">全部时间</option><option value="365">最近一年</option><option value="90">最近 90 天</option><option value="30">最近 30 天</option></select><svg class="control-icon control-chevron" aria-hidden="true" focusable="false" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></span></label>
-        <details class="more-filters"><summary>更多筛选 <svg class="control-icon control-chevron" aria-hidden="true" focusable="false" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></summary><div class="more-menu"><label>可见性<span class="select-control"><select id="scope"><option value="all">公开 + 私有</option><option value="public">仅公开仓库</option><option value="private">仅私有仓库</option></select><svg class="control-icon control-chevron" aria-hidden="true" focusable="false" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></span></label><label>语言<span class="select-control"><select id="language"><option value="all">全部语言</option></select><svg class="control-icon control-chevron" aria-hidden="true" focusable="false" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></span></label><div class="segmented" role="group" aria-label="数据范围"><button id="current-view" class="selected" aria-pressed="true">当前仓库</button><button id="archive-view" aria-pressed="false">历史档案</button></div><label class="stale-toggle"><input id="include-stale" type="checkbox">包含过期快照</label><p id="scope-description"></p></div></details>
-        <button id="reset-filters" class="text-button">重置</button>
-      </div>
-      <div id="active-filters" class="active-filters" hidden></div>
-      <div id="warnings" class="warning" role="status" hidden></div>
-      <section class="metrics-grid" aria-label="最新快照分类概览">
-        <button class="metric-card" data-card="total" aria-pressed="false"><span>总行数</span><strong class="metric-value">0</strong><small class="metric-context sr-only"></small></button>
-        <button class="metric-card" data-card="code" aria-pressed="true"><span>代码行</span><strong class="metric-value">0</strong><small class="metric-context sr-only"></small></button>
-        <button class="metric-card" data-card="comment" aria-pressed="false"><span>注释行</span><strong class="metric-value">0</strong><small class="metric-context sr-only"></small></button>
-        <button class="metric-card" data-card="documentation" aria-pressed="false"><span>文档行</span><strong class="metric-value">0</strong><small class="metric-context sr-only"></small></button>
-        <button class="metric-card" data-card="blank" aria-pressed="false"><span>空行</span><strong class="metric-value">0</strong><small class="metric-context sr-only"></small></button>
-        <button class="metric-card" data-card="files" aria-pressed="false"><span>文件数</span><strong class="metric-value">0</strong><small class="metric-context sr-only"></small></button>
-      </section>
-      <section class="panel timeline-panel" aria-labelledby="timeline-title">
-        <div class="sr-only"><span id="stat-label">当前代码行</span><strong id="stat-total">0</strong><p id="stat-context">最新已知快照</p></div>
-        <div class="chart-heading">
-          <h2 id="timeline-title">代码行存量趋势</h2>
-          <div class="chart-tools"><div class="change-stat"><span id="change-label">近 30 天净变化</span><strong id="stat-change">—</strong><p id="change-context" class="sr-only"></p></div><div class="chart-mode" role="group" aria-label="趋势图显示方式"><button id="chart-absolute" aria-pressed="true">规模</button><button id="chart-percent" aria-pressed="false">占比</button></div></div>
-        </div>
-        <p id="chart-interaction-help" class="sr-only">悬停查看快照，点击固定。聚焦图表后使用方向键浏览快照。</p>
-        <div id="chart" class="chart-container" aria-describedby="chart-interaction-help"></div>
-        <div id="chart-navigator" class="chart-navigator"></div>
-        <div class="chart-bottom"><span id="chart-range">UTC</span></div>
-
-        <details class="legend-details"><summary>仓库图层</summary><div id="chart-legend" class="series-legend" aria-label="仓库图层（仅影响趋势图）"></div></details>
-        <details class="snapshot-details"><summary>快照明细</summary><div id="chart-details"></div></details>
-      </section>
-      <div class="insights-grid">
-      <section class="panel monthly-panel" aria-labelledby="monthly-title"><div class="section-heading"><h2 id="monthly-title">净变化</h2><div class="insight-controls"><label><span class="sr-only">净变化指标</span><span class="select-control"><select id="change-metric"><option value="code">代码行</option><option value="comment">注释行</option><option value="documentation">文档行</option><option value="files">文件数</option></select><svg class="control-icon control-chevron" aria-hidden="true" focusable="false" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></span></label><label><span class="sr-only">净变化统计周期</span><span class="select-control"><select id="change-period"><option value="day">每日</option><option value="week">每周</option><option value="month" selected>每月</option></select><svg class="control-icon control-chevron" aria-hidden="true" focusable="false" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></span></label></div></div><div id="monthly-chart" class="monthly-chart"></div><div id="monthly-details" class="monthly-details"></div></section>
-      <section class="panel languages-panel" aria-labelledby="languages-title">
-        <div class="section-heading"><h2 id="languages-title">语言构成</h2><div class="composition-mode" role="group" aria-label="构成维度"><button id="composition-language" type="button" aria-pressed="true">语言</button><button id="composition-repository" type="button" aria-pressed="false">仓库</button></div><div class="language-total sr-only"><strong id="language-total">0</strong><span id="language-unit">代码行</span></div></div>
-        <div class="language-layout"><div class="language-visual"><div id="language-chart" class="language-chart"></div><button id="language-reset" class="text-button" hidden>显示全部语言</button></div>
-          <div class="language-breakdown"><div class="language-toolbar"><label><span class="sr-only">构成列表排序</span><span class="select-control"><select id="language-sort"><option value="value-desc">规模 大 → 小</option><option value="value-asc">规模 小 → 大</option><option value="name-asc">名称 A → Z</option><option value="name-desc">名称 Z → A</option></select><svg class="control-icon control-chevron" aria-hidden="true" focusable="false" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></span></label></div><div id="language-list" class="language-list"></div></div>
-        </div>
-      </section>
-      </div>
-      <section class="panel repositories-panel" id="repositories" aria-labelledby="repositories-title"><div class="section-heading"><h2 id="repositories-title">仓库 <span id="repository-count" class="count-badge">0</span></h2></div><div class="repository-table-toolbar"><label><span class="sr-only">在当前列表搜索仓库</span><input id="table-search" type="search" placeholder="在当前范围搜索仓库…" autocomplete="off"></label><button id="export-csv" class="export-button">导出 CSV <span aria-hidden="true">↓</span></button></div><div class="table-scroll"><table><thead><tr><th scope="col" aria-sort="ascending"><button data-sort="name">仓库 <span aria-hidden="true">↑</span></button></th><th scope="col" aria-sort="none"><button data-sort="total">总行数 <span aria-hidden="true">↕</span></button></th><th scope="col" aria-sort="none"><button data-sort="code">代码行 <span aria-hidden="true">↕</span></button></th><th scope="col" aria-sort="none"><button data-sort="comment">注释行 <span aria-hidden="true">↕</span></button></th><th scope="col" aria-sort="none"><button data-sort="documentation">文档行 <span aria-hidden="true">↕</span></button></th><th scope="col" aria-sort="none"><button data-sort="blank">空行 <span aria-hidden="true">↕</span></button></th><th scope="col" aria-sort="none"><button data-sort="files">文件数 <span aria-hidden="true">↕</span></button></th></tr></thead><tbody id="repository-table"></tbody><tfoot><tr id="repository-totals"></tr></tfoot></table></div></section>
-      <details class="technical-details" id="methodology"><summary>统计说明 <span aria-hidden="true">＋</span></summary><div class="technical-content"><section><h2>统计口径</h2><p>公开仓库记录默认分支第一父链提交树；私有仓库发布日级规模，保留仓库名称，不公开地址、分支或提交信息。按 UTC 对齐各仓库最近已知快照，观察点之间延续存量，不将提交增量相加。首次观测前的规模未知，净变化缺少期初快照时不作比较。</p><p>统一排除下载依赖、生成产物、日志与调试结果。真实源码批量导入仍会形成跃升；已确认的继承链按同源组统计，每个历史时点仅计入一个主导成员，其他仓库分别计数。旧规则快照不会混入当前汇总。</p><p>日、周、月净变化只比较有期初快照的仓库；首次观测的存量不计入净变化。各周期参与比较的仓库可能不同。日与月按 UTC，周从周一开始；未结束或被时间范围截断的周期会标注为非完整周期。总行数 = 代码 + 注释 + 文档 + 空行。</p><p id="rules-description"></p><a href="https://github.com/SiliconYC/poly-tally/blob/dev/docs/content-policy.md">查看收录与屏蔽规则 ↗</a></section><section class="publication-info" aria-label="公开与私有指标发布状态"><h2>数据发布</h2><p id="publication-counts"></p><p id="private-updated-at"></p><p>私有快照反映每日规模，不代表提交时点。</p></section><section><div class="run-title"><h2>最近一次公开采集</h2><span id="run-status" class="status-badge">等待数据</span></div><div id="run-summary" class="run-summary"></div></section></div></details>
-    </div>
-  </main>
-  <footer><span>Poly Tally</span><span id="footer-version">只读代码统计</span></footer>
-  <div id="copy-toast" class="copy-toast" role="status" aria-live="polite" aria-atomic="true"></div>
-  <noscript><div class="noscript">请启用 JavaScript 以查看仓库历史统计。</div></noscript>
-</body>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#fafafa" />
+    <meta name="description" content="Poly Tally：跨仓库代码规模、语言构成与历史变化的只读统计仪表盘。" />
+    <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+    <title>Poly Tally · 代码统计</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <noscript>请启用 JavaScript 以查看交互统计仪表盘。</noscript>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
 </html>

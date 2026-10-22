@@ -28,20 +28,6 @@ test('CSV follows the displayed row order, includes all line categories and esca
 });
 
 
-test('monthly labels retain the latest month without adjacent-label collisions', async () => {
-  const {monthLabelIndices} = await import('./insights.mjs');
-  assert.deepEqual(monthLabelIndices(12, 39), [0, 2, 4, 6, 8, 11]);
-  assert.deepEqual(monthLabelIndices(4, 90), [0, 1, 2, 3]);
-  assert.deepEqual(monthLabelIndices(0, 30), []);
-  assert.deepEqual(monthLabelIndices(1, 30), [0]);
-  for (const stride of [20, 30, 39, 60, 80, 100]) {
-    const indices = monthLabelIndices(12, stride);
-    assert.equal(indices.at(-1), 11);
-    for (let i = 1; i < indices.length; i++) assert.ok((indices[i] - indices[i - 1]) * stride >= 75);
-  }
-});
-
-
 test('daily changes retain negative stock changes, exact boundary events, and unknown opening stock', () => {
   const repositories = [repo('owner/one', [snap('2026-10-01T00:00:00Z', 10), snap('2026-10-02T00:00:00Z', 15), snap('2026-10-03T12:00:00Z', 9)])];
   const rows = insights.periodChanges?.(repositories, {period: 'day', since: '2026-10-01T00:00:00Z', until: '2026-10-03T23:59:59.999Z'});

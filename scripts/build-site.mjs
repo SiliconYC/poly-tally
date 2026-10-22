@@ -1,53 +1,15 @@
-import {cp, mkdir, rm, writeFile, readFile, readdir} from 'node:fs/promises';
-import {createHash} from 'node:crypto';
-import {resolve, relative, dirname, extname} from 'node:path';
+import {cp, mkdir, rm, writeFile, readFile} from 'node:fs/promises';
+import {resolve} from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {mergePrivateMetrics, validatePrivateMetrics, validateCompletePrivateMetrics, validateRetainedPrivateBaseline, validatePrivateMetricsReplacement} from './metrics.mjs';
 import {applyDisplayWindow} from '../web/model.mjs';
 
-// A release-wide content digest keeps the HTML, CSS and complete ESM graph together.
-// Hash filenames (rather than reload instructions) invalidate browser/CDN asset caches.
-async function versionAssets(site) {
-  const assets = [], htmlPages = [];
-  async function visit(directory) {
-    for (const entry of await readdir(directory, {withFileTypes: true})) {
-      const path = resolve(directory, entry.name);
-      if (entry.isDirectory()) { if (entry.name !== 'data') await visit(path); }
-      else if (/\.(?:mjs|js|css)$/.test(entry.name)) assets.push(path);
-      else if (entry.name.endsWith('.html')) htmlPages.push(path);
-    }
-  }
-  await visit(site);
-  if (!assets.length) return;
-  assets.sort();
-  const sources = new Map();
-  const digest = createHash('sha256');
-  for (const path of assets) {
-    const source = await readFile(path, 'utf8');
-    sources.set(path, source);
-    digest.update(relative(site, path)).update('\0').update(source).update('\0');
-  }
-  const version = digest.digest('hex').slice(0, 16);
-  const names = new Map(assets.map(path => [path, path.slice(0, -extname(path).length) + '.' + version + extname(path)]));
-  function rewrite(source, path) {
-    // Resolve only quoted relative references to assets we actually copied. Data
-    // fetches, external URLs, anchors and arbitrary strings remain untouched.
-    return source.replace(/(["'])(\.{1,2}\/[^"'\s?#]+)([?#][^"']*)?\1/g, (match, quote, url, suffix = '') => {
-      const replacement = names.get(resolve(dirname(path), url));
-      if (!replacement) return match;
-      let target = relative(dirname(path), replacement).split('\\').join('/');
-      if (!target.startsWith('.')) target = './' + target;
-      return quote + target + suffix + quote;
-    });
-  }
-  for (const [path, source] of sources) {
-    await writeFile(names.get(path), rewrite(source, path));
-    await rm(path);
-  }
-  for (const page of htmlPages) await writeFile(page, rewrite(await readFile(page, 'utf8'), page));
+async function bundleSite({root, site}) {
+  const {build} = await import('vite');
+  await build({configFile: resolve(root, 'vite.config.ts'), root: resolve(root, 'web'), build: {outDir: site}});
 }
 
-export async function buildSite({root = resolve(import.meta.dirname, '..'), privateStatus = process.env.POLY_TALLY_PRIVATE_STATUS, externalPrivateBlobSha = process.env.POLY_TALLY_EXTERNAL_PRIVATE_BLOB_SHA, logger = console} = {}) {
+export async function buildSite({root = resolve(import.meta.dirname, '..'), privateStatus = process.env.POLY_TALLY_PRIVATE_STATUS, externalPrivateBlobSha = process.env.POLY_TALLY_EXTERNAL_PRIVATE_BLOB_SHA, logger = console, bundle = bundleSite} = {}) {
   let data = JSON.parse(await readFile(resolve(root, 'web/data/stats.json'), 'utf8'));
   if (data.schemaVersion !== 1 || !Array.isArray(data.repositories)) throw new Error('Invalid public dataset');
   let display;
@@ -95,12 +57,13 @@ export async function buildSite({root = resolve(import.meta.dirname, '..'), priv
   }
   // 先验证并合并完整事实，再裁剪展示；检查点和私有快照始终保留完整历史。
   data = applyDisplayWindow(data, display);
-  await rm(resolve(root, 'site'), {recursive: true, force: true});
-  await mkdir(resolve(root, 'site'), {recursive: true});
-  await cp(resolve(root, 'web'), resolve(root, 'site'), {recursive: true, filter: path => !path.endsWith('.test.mjs') && !['private-metrics.json', 'retained-private-baseline.json'].some(name => path === resolve(root, 'web/data', name))});
-  await writeFile(resolve(root, 'site/data/stats.json'), JSON.stringify(data));
-  await versionAssets(resolve(root, 'site'));
-  await writeFile(resolve(root, 'site/.nojekyll'), '');
+  const site = resolve(root, 'site');
+  await rm(site, {recursive: true, force: true});
+  await bundle({root, site});
+  await mkdir(resolve(site, 'data'), {recursive: true});
+  await writeFile(resolve(site, 'data/stats.json'), JSON.stringify(data));
+  await cp(resolve(root, 'web/favicon.svg'), resolve(site, 'favicon.svg'));
+  await writeFile(resolve(site, '.nojekyll'), '');
   logger.log(`Built static site: ${data.repositories.length} repository records.`);
   return data;
 }
