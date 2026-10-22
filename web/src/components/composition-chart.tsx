@@ -21,7 +21,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { compact, format } from "@/lib/dashboard";
+import { categoricalPalette, compact, format } from "@/lib/dashboard";
 import type { Metric, Repository } from "@/lib/types";
 
 type Props = {
@@ -32,40 +32,28 @@ type Props = {
   onCopy: (repository: Repository) => void;
 };
 type Item = { id: string; name: string; value: number; color: string };
-const palette = [
-  "#2563eb",
-  "#ea580c",
-  "#16a34a",
-  "#9333ea",
-  "#e11d48",
-  "#0891b2",
-  "#ca8a04",
-  "#db2777",
-  "#475569",
-  "#0d9488",
-  "#7c3aed",
-  "#b45309",
-];
 const languageColors: Record<string, string> = {
-  Python: "#d97706",
-  C: "#16a34a",
-  "C++": "#7c3aed",
-  "C#": "#15803d",
-  TypeScript: "#2563eb",
-  JavaScript: "#ca8a04",
-  TSX: "#9333ea",
-  Go: "#0891b2",
-  Rust: "#b91c1c",
-  Markdown: "#475569",
-  HTML: "#ea580c",
-  CSS: "#db2777",
-  QML: "#0d9488",
+  Python: "#9c8971",
+  C: "#83917b",
+  "C++": "#8a87a1",
+  "C#": "#7a8062",
+  TypeScript: "#647f8d",
+  JavaScript: "#a39a75",
+  TSX: "#94859d",
+  Go: "#7e9898",
+  Rust: "#a37970",
+  Markdown: "#6f7c86",
+  HTML: "#ad8b73",
+  CSS: "#9d8192",
+  QML: "#758f86",
 };
 function languageColor(name: string) {
   let hash = 0;
   for (const character of name)
     hash = (hash * 31 + character.charCodeAt(0)) >>> 0;
-  return languageColors[name] ?? palette[hash % palette.length];
+  return (
+    languageColors[name] ?? categoricalPalette[hash % categoricalPalette.length]
+  );
 }
 
 export function CompositionChart({
@@ -166,10 +154,10 @@ export function CompositionChart({
       </CardHeader>
       <CardContent className="analysis-content">
         {total > 0 ? (
-          <div className="grid min-w-0 gap-5 @min-[520px]:grid-cols-[200px_minmax(0,1fr)] @min-[520px]:items-center">
+          <div className="composition-layout">
             <ChartContainer
               config={config}
-              className="mx-auto h-[250px] w-full max-w-[290px] aspect-square"
+              className="composition-donut mx-auto aspect-square"
             >
               <PieChart accessibilityLayer={false}>
                 <ChartTooltip
@@ -189,8 +177,8 @@ export function CompositionChart({
                   data={items}
                   dataKey="value"
                   nameKey="name"
-                  innerRadius={76}
-                  outerRadius={98}
+                  innerRadius="72%"
+                  outerRadius="92%"
                   strokeWidth={2}
                   stroke="var(--background)"
                   isAnimationActive={false}
@@ -254,7 +242,7 @@ export function CompositionChart({
                 <span>{METRIC_LABELS[metric]} / 占比</span>
               </div>
               <ul
-                className="max-h-72 divide-y divide-border/50 overflow-auto"
+                className="composition-list divide-y divide-border/50 overflow-auto"
                 aria-label={
                   dimension === "repository" ? "仓库构成明细" : "语言构成明细"
                 }
