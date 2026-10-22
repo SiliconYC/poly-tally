@@ -1,4 +1,4 @@
-import { memo, useId, useMemo, useRef, useState } from "react";
+import { memo, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
 import { Area, AreaChart, Brush, CartesianGrid, XAxis, YAxis } from "recharts";
 import { ChevronLeft, ChevronRight, RotateCcw } from "lucide-react";
@@ -67,7 +67,6 @@ const HistoryPlot = memo(function HistoryPlot({
   percent: boolean;
   maximum: number;
 }) {
-  const gradientId = useId().replace(/:/g, "");
   return (
     <ChartContainer
       config={config}
@@ -78,29 +77,6 @@ const HistoryPlot = memo(function HistoryPlot({
         margin={{ top: 12, right: 16, left: 12, bottom: 8 }}
         accessibilityLayer={false}
       >
-        <defs>
-          {series.map((item, column) => (
-            <linearGradient
-              key={item.id}
-              id={`${gradientId}-${column}`}
-              x1="0"
-              y1="0"
-              x2="0"
-              y2="1"
-            >
-              <stop
-                offset="0%"
-                stopColor={colors.get(item.id)}
-                stopOpacity={0.8}
-              />
-              <stop
-                offset="100%"
-                stopColor={colors.get(item.id)}
-                stopOpacity={0.3}
-              />
-            </linearGradient>
-          ))}
-        </defs>
         <CartesianGrid vertical={false} strokeDasharray="3 3" />
         <XAxis
           dataKey="time"
@@ -129,8 +105,8 @@ const HistoryPlot = memo(function HistoryPlot({
             stackId="stock"
             stroke={colors.get(item.id)}
             strokeWidth={1.2}
-            strokeOpacity={0.9}
-            fill={`url(#${gradientId}-${column})`}
+            strokeOpacity={1}
+            fill={colors.get(item.id)}
             fillOpacity={1}
             isAnimationActive={false}
             dot={false}

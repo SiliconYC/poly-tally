@@ -40,57 +40,57 @@
 
 :root {
   --radius: 0.5rem;
-  --background: #f7f7f0;
-  --foreground: #252e28;
-  --card: #fcfcf7;
+  --background: #f8f8f5;
+  --foreground: #171b22;
+  --card: #ffffff;
   --card-foreground: var(--foreground);
-  --popover: #fffffb;
+  --popover: #ffffff;
   --popover-foreground: var(--foreground);
-  --primary: #3c604b;
-  --primary-foreground: #fffffb;
-  --secondary: #eeeee5;
+  --primary: #1f4d3a;
+  --primary-foreground: #ffffff;
+  --secondary: #eceef1;
   --secondary-foreground: var(--foreground);
-  --muted: #eeeee5;
-  --muted-foreground: #687060;
-  --accent: #e8ecdf;
-  --accent-foreground: #304d3b;
+  --muted: #eceef1;
+  --muted-foreground: #434b57;
+  --accent: #e6ebf2;
+  --accent-foreground: #182333;
   --destructive: oklch(0.577 0.245 27.325);
-  --border: #dfe3d5;
-  --input: #d6dccd;
-  --ring: #6f8d68;
-  --chart-1: #5c8061;
-  --chart-2: #9fac7b;
-  --chart-3: #6f9193;
-  --chart-4: #c8ab68;
-  --chart-5: #a58b93;
-  --chart-negative: #b3775e;
-  --metric-active: #e8eddd;
-  --metric-hover: #eff1e7;
+  --border: #d6dbe2;
+  --input: #c5cdd6;
+  --ring: #3b82f6;
+  --chart-1: #0f766e;
+  --chart-2: #ea580c;
+  --chart-3: #0891b2;
+  --chart-4: #ca8a04;
+  --chart-5: #9333ea;
+  --chart-negative: #c2410c;
+  --metric-active: #e4ebf4;
+  --metric-hover: #edf0f4;
 }
 
 .dark {
-  --background: #161d19;
-  --foreground: #e9edde;
-  --card: #1c241e;
+  --background: #11151b;
+  --foreground: #f3f4f6;
+  --card: #191e26;
   --card-foreground: var(--foreground);
-  --popover: #252f27;
+  --popover: #252c36;
   --popover-foreground: var(--foreground);
-  --primary: #b2c99a;
-  --primary-foreground: #1c281c;
-  --secondary: #273128;
+  --primary: #81c9a5;
+  --primary-foreground: #10261a;
+  --secondary: #252c36;
   --secondary-foreground: var(--foreground);
-  --muted: #273128;
-  --muted-foreground: #a0ad9c;
-  --accent: #303e2e;
-  --accent-foreground: #d9e5ca;
+  --muted: #252c36;
+  --muted-foreground: #c1c7d0;
+  --accent: #303c4c;
+  --accent-foreground: #f3f4f6;
   --destructive: oklch(0.704 0.191 22.216);
-  --border: #344034;
-  --input: #43513e;
-  --ring: #a0b589;
-  --chart-1: #8eac7c;
-  --chart-negative: #d59a7b;
-  --metric-active: #2d3b2b;
-  --metric-hover: #232e23;
+  --border: #3d4755;
+  --input: #4b586b;
+  --ring: #60a5fa;
+  --chart-1: #2dd4bf;
+  --chart-negative: #fb923c;
+  --metric-active: #273343;
+  --metric-hover: #202936;
 }
 
 @layer base {
@@ -237,7 +237,7 @@
 }
 .metric[aria-pressed="true"] {
   background: var(--metric-active);
-  color: var(--primary);
+  color: var(--foreground);
 }
 .metric[aria-pressed="true"]::before,
 .metric[aria-pressed="true"] + .metric::before {
@@ -264,7 +264,7 @@
 }
 
 .metric[aria-pressed="true"] .metric-label {
-  color: var(--primary);
+  color: var(--foreground);
 }
 .metric[aria-pressed="true"] .metric-indicator {
   opacity: 1;

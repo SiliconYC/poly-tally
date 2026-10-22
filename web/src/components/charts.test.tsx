@@ -66,6 +66,16 @@ function renderHistory() {
 }
 
 describe("history interactions", () => {
+  it("renders each repository as a solid opaque color so layer boundaries stay unambiguous", () => {
+    const { container } = render(<HistoryChart {...historyProps} />);
+    const areas = container.querySelectorAll(
+      '[aria-label="历史趋势图"] .recharts-area-area',
+    );
+    expect(areas).toHaveLength(2);
+    expect(areas[0]).toHaveAttribute("fill", "#0d9488");
+    expect(areas[1]).toHaveAttribute("fill", "#3b82f6");
+    for (const area of areas) expect(area).toHaveAttribute("fill-opacity", "1");
+  });
   it("keeps a not-yet-observed repository unknown in keyboard snapshot details", () => {
     renderHistory();
     const chart = screen.getByRole("region", { name: "历史趋势图" });

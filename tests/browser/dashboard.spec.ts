@@ -438,7 +438,7 @@ test("published real data matches the existing model in every metric and leaves 
     await expect(page.getByTestId(`metric-${metric}`)).toHaveText(
       new Intl.NumberFormat("zh-CN").format(totals[metric]),
     );
-  await mkdir("docs/qa/visual-refresh", { recursive: true });
+  await mkdir("docs/qa/contrast-fix", { recursive: true });
   for (const width of [1440, 390]) {
     await page.setViewportSize({ width, height: 1100 });
     if (
@@ -448,12 +448,12 @@ test("published real data matches the existing model in every metric and leaves 
     )
       await page.getByRole("button", { name: "切换浅色模式" }).click();
     await page.screenshot({
-      path: `docs/qa/visual-refresh/${width}-light.png`,
+      path: `docs/qa/contrast-fix/${width}-light.png`,
       fullPage: true,
     });
     await page.getByRole("button", { name: "切换深色模式" }).click();
     await page.screenshot({
-      path: `docs/qa/visual-refresh/${width}-dark.png`,
+      path: `docs/qa/contrast-fix/${width}-dark.png`,
       fullPage: true,
     });
     await expect
@@ -539,10 +539,10 @@ test("large aligned histories render without discarding changes and remain inter
     expect(percentMs).toBeLessThan(6000);
     expect(keyboardMs).toBeLessThan(6000);
   }
-  await mkdir("docs/qa/visual-refresh", { recursive: true });
+  await mkdir("docs/qa/contrast-fix", { recursive: true });
   const { writeFile } = await import("node:fs/promises");
   await writeFile(
-    "docs/qa/visual-refresh/browser-performance.json",
+    "docs/qa/contrast-fix/browser-performance.json",
     JSON.stringify(
       {
         browser: await page.context().browser()!.version(),
