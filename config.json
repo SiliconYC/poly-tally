@@ -1,5 +1,8 @@
 {
   "datasetEpoch": "source-only-lineage-2026-10-21-v1",
+  "display": {
+    "historyStart": "2025-01-17T00:00:00+08:00"
+  },
   "lineageGroups": [
     {
       "id": "vitro",

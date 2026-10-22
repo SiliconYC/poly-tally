@@ -133,7 +133,9 @@ function render() {
   $('warnings').textContent = messages.join(' ');
   $('timeline-title').textContent = `${METRIC_LABELS[state.metric]}存量趋势`;
   const until = data.generatedAt;
-  const since = state.period === 'all' ? undefined : new Date(Date.parse(until) - Number(state.period) * 86400000).toISOString();
+  const displayStart = data.display?.historyStart ? Date.parse(data.display.historyStart) : -Infinity;
+  const periodStart = state.period === 'all' ? displayStart : Math.max(displayStart, Date.parse(until) - Number(state.period) * 86400000);
+  const since = Number.isFinite(periodStart) ? new Date(periodStart).toISOString() : undefined;
   renderStackedChart({container: $('chart'), navigator: $('chart-navigator'), legend: $('chart-legend'), details: $('chart-details'), rangeLabel: $('chart-range'), repositories: selected, colors, metric: state.metric, label: METRIC_LABELS[state.metric], language: state.language, since, until, view: chartView});
   renderPeriodChanges({container: $('monthly-chart'), details: $('monthly-details'), periods: periodChanges(selected, {since, until, period:state.changePeriod, metric:state.changeMetric, language:state.language, limit:state.changePeriod === 'day' ? 30 : 12}), label: METRIC_LABELS[state.changeMetric], onSelect: period => {
     chartView.range = [Date.parse(period.since), Date.parse(period.until)]; render(); $('timeline-title').scrollIntoView({block: 'start', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth'});
@@ -141,7 +143,9 @@ function render() {
   renderLanguages(selected);
   renderTable();
   const changeDays = state.period === 'all' ? 30 : Number(state.period);
-  const change = stockChange(selected, { since: new Date(Date.parse(until) - changeDays * 86400000).toISOString(), until, language: state.language, metric: state.metric });
+  const changeStart = Math.max(displayStart, Date.parse(until) - changeDays * 86400000);
+  // 显示起点是包含端点的下限，恰在此刻发生的变化须与首个截断周期一致计入。
+  const change = stockChange(selected, { since: new Date(changeStart).toISOString(), until, language: state.language, metric: state.metric, includeStart: changeStart === displayStart });
   $('change-label').textContent = '近 ' + changeDays + ' 天净变化';
   $('stat-change').textContent = change.change === null ? '暂不可比' : (change.change > 0 ? '+' : '') + format(change.change);
   $('stat-change').className = change.change === null ? 'unavailable' : change.change < 0 ? 'negative' : '';

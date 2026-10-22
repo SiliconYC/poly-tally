@@ -15,6 +15,72 @@ const privateRepo = (code = 30, extra = {}) => repo('private-0123456789abcdef', 
   name: '私有仓库 · 012345', url: null, branch: null, head: null, visibility: 'private', sourceKey: '0123456789abcdef', snapshotKind: 'daily', ...extra,
 });
 
+test('display cutoff hides earlier observations while preserving opening stock, totals, languages and source history', async () => {
+  const start = '2025-01-17T00:00:00+08:00';
+  const boundary = '2025-01-16T16:00:00Z';
+  const a = repo('a', [snapshot('2024-01-01T00:00:00Z', 10, 'Python', 2), snapshot('2025-01-18T00:00:00Z', 20, 'Python', 3)]);
+  const dormant = repo('dormant', [snapshot('2023-01-01T00:00:00Z', 7, 'Rust', 1)]);
+  const fresh = repo('fresh', [snapshot('2025-01-19T00:00:00Z', 5)]);
+  const data = {...dataset([a, dormant, fresh]), generatedAt:'2025-02-01T00:00:00Z'};
+  const source = JSON.stringify(data);
+  const displayed = model.applyDisplayWindow(data, {historyStart:start});
+  assert.equal(displayed.display.historyStart, boundary);
+  assert.deepEqual(displayed.repositories.map(r => r.history.map(s => s.timestamp)), [
+    [boundary, '2025-01-18T00:00:00Z'], [boundary], ['2025-01-19T00:00:00Z'],
+  ]);
+  assert.deepEqual(model.stackedHistory(displayed.repositories).points[0].values, [10, 7, null]);
+  assert.deepEqual(latestTotals(displayed.repositories), latestTotals(data.repositories));
+  assert.deepEqual(languageTotals(displayed.repositories), languageTotals(data.repositories));
+  assert.equal(model.repositoryUpdatedAt(displayed.repositories[1]), '2023-01-01T00:00:00Z', 'a carried boundary is not a new commit');
+  assert.equal(displayed.summary.snapshots, 4);
+  const change = model.stockChange([displayed.repositories[0]], {since:'2025-01-16T15:59:59.999Z', until:'2025-01-19T00:00:00Z'});
+  assert.deepEqual(change, {baseline:10, latest:20, change:10, missing:0});
+  const {periodChanges, repositoryCsv} = await import('./insights.mjs');
+  const periods = periodChanges([displayed.repositories[0]], {period:'month', until:'2025-01-31T23:59:59Z'});
+  assert.equal(periods[0].since, '2025-01-16T16:00:00.000Z');
+  assert.equal(periods[0].partial, true);
+  assert.equal(periods[0].change, 10);
+  assert.equal(repositoryCsv(displayed.repositories), repositoryCsv(data.repositories));
+  assert.equal(JSON.stringify(data), source, 'rebuilding the display must never truncate stored source facts');
+  const earlier = model.applyDisplayWindow(data, {historyStart:'2023-01-01T00:00:00Z'});
+  assert.equal(earlier.repositories[1].history[0].timestamp, '2023-01-01T00:00:00Z');
+});
+
+test('cutoff is inclusive, does not duplicate exact-boundary observations, and cannot expose history after a future start', () => {
+  const start = '2025-01-17T00:00:00Z';
+  const data = {...dataset([repo('a', [snapshot('2025-01-16T00:00:00Z', 10), snapshot(start, 12), snapshot(start, 14)])]), generatedAt:'2025-02-01T00:00:00Z'};
+  const displayed = model.applyDisplayWindow(data, {historyStart:start});
+  assert.deepEqual(displayed.repositories[0].history.map(s => s.metrics.code), [12, 14]);
+  assert.equal(model.stackedHistory(displayed.repositories).points[0].value, 14);
+  const future = model.applyDisplayWindow(data, {historyStart:'2025-03-01T00:00:00Z'});
+  assert.deepEqual(selectRepositories(future), []);
+  assert.equal(future.summary.code, 0);
+  assert.equal(future.summary.snapshots, 0);
+  assert.equal(model.applyDisplayWindow(data), data);
+});
+
+test('historical area ranking ignores all duration before the configured display start', () => {
+  const data = {...dataset([
+    repo('ancient', [snapshot('2023-01-01T00:00:00Z', 1000), snapshot('2025-01-01T00:00:00Z', 1)]),
+    repo('recent', [snapshot('2025-01-18T00:00:00Z', 10)]),
+  ]), generatedAt:'2025-02-01T00:00:00Z'};
+  const displayed = model.applyDisplayWindow(data, {historyStart:'2025-01-17T00:00:00Z'});
+  assert.deepEqual(model.rankRepositoriesByHistoricalArea(displayed.repositories, {until:data.generatedAt}).map(r => r.id), ['recent', 'ancient']);
+});
+
+test('display-window net change includes exact-boundary updates and matches the clipped calendar bucket', async () => {
+  const start = '2025-01-16T16:00:00Z';
+  const end = '2025-01-20T00:00:00Z';
+  const source = {...dataset([repo('a', [snapshot('2025-01-01T00:00:00Z', 10), snapshot(start, 15), snapshot('2025-01-18T00:00:00Z', 20)])]), generatedAt:end};
+  const projected = model.applyDisplayWindow(source, {historyStart:start});
+  assert.deepEqual(model.stockChange(projected.repositories, {since:start, until:end, includeStart:true}), {baseline:10, latest:20, change:10, missing:0});
+  const {periodChanges} = await import('./insights.mjs');
+  assert.equal(periodChanges(projected.repositories, {since:start, until:end})[0].change, 10);
+  const unknown = model.applyDisplayWindow({...source, repositories:[repo('new', [snapshot(start, 15), snapshot('2025-01-18T00:00:00Z', 20)])]}, {historyStart:start});
+  assert.equal(model.stockChange(unknown.repositories, {since:start, until:end, includeStart:true}).change, null);
+  assert.equal(model.stockChange(projected.repositories, {since:start, until:end}).change, 5, 'ordinary rolling intervals retain their existing open-start comparison');
+});
+
 test('visibility scopes consistently select public commits and private daily metrics under the same rules', () => {
   const data = dataset([repo('a', [snapshot(day(1), 10)]), privateRepo(), privateRepo(900, { id: 'private-fedcba9876543210', rulesVersion: 'old' })]);
   const all = selectRepositories(data);

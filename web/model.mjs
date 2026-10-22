@@ -74,6 +74,32 @@ export function languageTotals(repositories, metric = 'code', { key = 'value', d
   return [...totals].map(([name, value]) => ({ name, value })).filter(language => language.value > 0).sort((a, b) => (key === 'name' ? a.name.localeCompare(b.name) : a.value - b.value) * (direction === 'desc' ? -1 : 1) || a.name.localeCompare(b.name));
 }
 
+// 只生成展示投影，不回写源快照或参与统计规则版本。更早的起点须重新读取完整发布输入。
+export function applyDisplayWindow(data, display) {
+  if (display === undefined) return data;
+  if (!display || typeof display !== 'object' || Array.isArray(display)) throw new Error('Invalid display configuration');
+  if (display.historyStart === undefined) return data;
+  const value = display.historyStart;
+  const local = typeof value === 'string' && value.match(/^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})$/)?.[1];
+  const start = instant(value);
+  if (!local || !Number.isFinite(start) || new Date(instant(local + 'Z')).toISOString().slice(0, 19) !== local) throw new Error('display.historyStart 必须是有效且带时区的 ISO 日期时间');
+  const boundary = iso(start);
+  const repositories = data.repositories.map(repository => {
+    const history = sortedHistory(repository).map(({time, index, ...snapshot}) => snapshot);
+    const before = history.filter(snapshot => instant(snapshot.timestamp) < start).at(-1);
+    const visible = start > instant(data.generatedAt) ? [] : history.filter(snapshot => instant(snapshot.timestamp) >= start);
+    const baseline = before && start <= instant(data.generatedAt) ? {timestamp: before.timestamp, metrics: before.metrics, languages: before.languages} : null;
+    // 窗口起点延续最后已知存量；不复制旧提交标识，也不把边界点当作新的仓库更新。
+    if (baseline && (!visible.length || instant(visible[0].timestamp) > start)) visible.unshift({timestamp: boundary, metrics: baseline.metrics, languages: baseline.languages, displayBoundary: true});
+    return {...repository, lastCommitDate: repositoryUpdatedAt(repository), history: visible, ...(baseline ? {displayBaseline: baseline} : {})};
+  });
+  const active = selectRepositories({...data, repositories});
+  const {total, ...metrics} = latestTotals(active);
+  const snapshots = active.reduce((sum, repository) => sum + repository.history.length, 0);
+  const privateCount = active.filter(repository => repositoryVisibility(repository) === 'private').length;
+  return {...data, display: {...display, historyStart: boundary}, repositories, summary: {...data.summary, ...metrics, repositories: active.length, publicRepositories: active.length - privateCount, privateRepositories: privateCount, commits: snapshots, snapshots}};
+}
+
 export function stackedHistory(repositories, { language = 'all', metric = 'code', since, until } = {}) {
   const series = repositories.map(repository => ({ id: repository.id, name: repositoryDisplayName(repository) }));
   const events = repositories.flatMap((repository, repoIndex) => sortedHistory(repository).map(snapshot => ({ ...snapshot, repoIndex })));
@@ -164,12 +190,13 @@ export function repositoryOptions(repositories, { query = '', ...sorting } = {})
   return sortRepositories(repositories.filter(repository => repository.status !== 'archived' && repository.name.toLocaleLowerCase().includes(search)), sorting);
 }
 
-export function stockChange(repositories, { since, until, language = 'all', metric = 'code' } = {}) {
+export function stockChange(repositories, { since, until, language = 'all', metric = 'code', includeStart = false } = {}) {
   let baseline = 0, latest = 0, missing = 0;
   const start = instant(since), end = instant(until);
   for (const repository of repositories) {
-    const history = sortedHistory(repository).filter(snapshot => snapshot.time <= end);
-    const before = history.filter(snapshot => snapshot.time <= start).at(-1);
+    // 期初事实仅供差分，不进入图表、排序或可见快照计数；避免截断月份丢失比较基线。
+    const history = sortedHistory(repository.displayBaseline ? {...repository, history: [repository.displayBaseline, ...repository.history]} : repository).filter(snapshot => snapshot.time <= end);
+    const before = history.filter(snapshot => includeStart ? snapshot.time < start : snapshot.time <= start).at(-1);
     if (!before) missing++;
     else baseline += metricValue(snapshotMetrics(before, language), metric);
     latest += metricValue(snapshotMetrics(history.at(-1), language), metric);

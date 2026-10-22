@@ -36,6 +36,37 @@ test('site retains public-only mode when no private snapshot is configured', asy
   assert.deepEqual(JSON.parse(await readFile(join(root, 'site/data/stats.json'))), publicStats);
 });
 
+test('changing display start rebuilds only the site and restores earlier observations from untouched full inputs', async t => {
+  const root = await fixture(t);
+  const point = (timestamp, code) => ({timestamp, metrics:{code, comment:0, blank:0, documentation:0, files:1}, languages:{Python:{code, comment:0, blank:0, documentation:0, files:1}}});
+  const source = {...publicStats, summary:{code:20}, repositories:[{id:'1', name:'owner/one', status:'active', rulesVersion:publicStats.rules.version, history:[point('2024-01-01T00:00:00Z',10),point('2025-01-18T00:00:00Z',20)]}]};
+  const bytes = JSON.stringify(source);
+  await writeFile(join(root,'web/data/stats.json'), bytes);
+  await writeFile(join(root,'config.json'), JSON.stringify({display:{historyStart:'2025-01-17T00:00:00+08:00'}}));
+  const {buildSite} = await import('./build-site.mjs');
+  const first = await buildSite({root, logger:{log(){}}});
+  assert.equal(first.display.historyStart, '2025-01-16T16:00:00Z');
+  assert.deepEqual(first.repositories[0].history.map(p=>p.timestamp), ['2025-01-16T16:00:00Z','2025-01-18T00:00:00Z']);
+  assert.equal(first.summary.code, 20);
+  await writeFile(join(root,'config.json'), JSON.stringify({display:{historyStart:'2023-01-01T00:00:00Z'}}));
+  const earlier = await buildSite({root, logger:{log(){}}});
+  assert.deepEqual(earlier.repositories[0].history, source.repositories[0].history);
+  assert.equal(await readFile(join(root,'web/data/stats.json'),'utf8'), bytes);
+  assert.equal(earlier.rules.version, source.rules.version);
+});
+
+test('invalid or ambiguous display dates fail before replacing the previously built site', async t => {
+  const root = await fixture(t);
+  await mkdir(join(root,'site'));
+  await writeFile(join(root,'site/index.html'),'previous-site');
+  const {buildSite} = await import('./build-site.mjs');
+  for (const historyStart of ['2025-01-17', '2025-01-17T00:00:00', '2025-02-30T00:00:00Z', 'invalid', 123]) {
+    await writeFile(join(root,'config.json'),JSON.stringify({display:{historyStart}}));
+    await assert.rejects(buildSite({root,logger:{log(){}}}), /historyStart/);
+    assert.equal(await readFile(join(root,'site/index.html'),'utf8'),'previous-site');
+  }
+});
+
 test('invalid private data is rejected before replacing a previous site', async t => {
   const root = await fixture(t, {...envelope, rawSource: 'SENSITIVE-private/path'});
   await mkdir(join(root, 'site'));
