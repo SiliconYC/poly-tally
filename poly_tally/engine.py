@@ -24,6 +24,7 @@ class 历史引擎_类:
         arg_规则: 规则_类,
         arg_缓存目录: Path | None = None,
     ) -> None:
+        self.对象工厂 = None
         self.目录 = arg_数据目录
         self.对象目录 = (arg_缓存目录 if arg_缓存目录 is not None else arg_数据目录) / "objects"
         self.规则 = arg_规则
@@ -52,7 +53,7 @@ class 历史引擎_类:
             self.数据库.api_保存仓库(状态)
             self.计数["unchangedRepositories"] += 1
             return 状态
-        对象 = arg_对象 if arg_对象 is not None else Git对象_类(self._对象路径(仓库ID, arg_离线))
+        对象 = arg_对象 if arg_对象 is not None else (self.对象工厂(arg_元数据, self._对象路径(仓库ID, arg_离线)) if self.对象工厂 is not None and not arg_离线 else Git对象_类(self._对象路径(仓库ID, arg_离线)))
         计算开始 = None
         try:
             if arg_离线:
