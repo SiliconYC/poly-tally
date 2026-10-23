@@ -26,8 +26,14 @@ export function niceAxis(
   if (!values.length || values.every((value) => value === 0))
     return { domain: [0, 5], ticks: [0, 1, 2, 3, 4, 5] };
 
-  const minimum = Math.min(0, ...values);
-  const maximum = Math.max(0, ...values);
+  // Histories may contain thousands of snapshots; avoid spreading a large
+  // array into Math.min/Math.max, which can exceed the engine argument limit.
+  let minimum = 0;
+  let maximum = 0;
+  for (const value of values) {
+    minimum = Math.min(minimum, value);
+    maximum = Math.max(maximum, value);
+  }
   const low = minimum < 0 ? minimum * 1.08 : 0;
   const high = maximum > 0 ? maximum * 1.08 : 0;
   const step = Math.max(1, niceStep((high - low) / Math.max(2, targetIntervals)));
