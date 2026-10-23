@@ -20,7 +20,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { compact, format, metricOrder } from "@/lib/dashboard";
+import { format, metricOrder } from "@/lib/dashboard";
+import { axisTickLabel, niceAxis } from "@/lib/chart-axis";
 import type { ChangePeriod, Metric, Repository } from "@/lib/types";
 
 type Props = {
@@ -49,15 +50,11 @@ export function ChangesChart({ repositories, language, since, until }: Props) {
       }) as ChangePeriod[],
     [repositories, language, since, until, metric, period],
   );
-  const bounds = useMemo(() => {
-    const values = periods.flatMap((item) =>
-      item.change === null ? [] : [item.change],
-    );
-    const low = Math.min(0, ...values),
-      high = Math.max(0, ...values),
-      padding = (high - low || 1) * 0.15;
-    return [low - padding, high + padding] as [number, number];
-  }, [periods]);
+  // Keep the zero baseline, regular ticks and rounded endpoints in sync.
+  const axis = useMemo(
+    () => niceAxis(periods.map((item) => item.change)),
+    [periods],
+  );
   const config = useMemo(
     () => ({ change: { label: METRIC_LABELS[metric], color: "#0d9488" } }),
     [metric],
@@ -127,16 +124,24 @@ export function ChangesChart({ repositories, language, since, until }: Props) {
                 }
               />
               <YAxis
-                width={48}
+                width={60}
                 axisLine={false}
                 tickLine={false}
-                tickFormatter={compact}
-                domain={bounds}
+                tickMargin={8}
+                interval={0}
+                allowDataOverflow
+                tickFormatter={(value) => axisTickLabel(Number(value), axis.ticks)}
+                domain={axis.domain}
+                ticks={axis.ticks}
               />
-              <ReferenceLine y={0} stroke="var(--border)" />
+              <ReferenceLine y={0} stroke="var(--muted-foreground)" strokeOpacity={0.6} strokeWidth={1.4} />
               <ChartTooltip
                 filterNull={false}
-                cursor={{ fill: "var(--muted)", opacity: 0.5 }}
+                // Pin the panel vertically like the Qt chart; avoid a jittery
+                // tooltip chasing every mouse movement up and down.
+                position={{ y: 12 }}
+                wrapperStyle={{ pointerEvents: "none" }}
+                cursor={{ fill: "var(--muted)", opacity: 0.16 }}
                 content={({ active, label }) => {
                   if (!active) return null;
                   const item = periods.find(
@@ -152,16 +157,16 @@ export function ChangesChart({ repositories, language, since, until }: Props) {
                     .filter(Boolean)
                     .join(" · ");
                   return (
-                    <div className="rounded-lg border border-border/70 bg-background p-3 text-xs">
-                      <p className="text-muted-foreground">{item.label}</p>
-                      <p className="mt-1 font-medium">
+                    <div className="min-w-40 max-w-[min(260px,calc(100vw-24px))] rounded-xl border border-border/70 bg-popover/95 px-3.5 py-3 text-xs text-popover-foreground shadow-lg backdrop-blur-sm">
+                      <p className="font-medium text-muted-foreground">{item.label}</p>
+                      <p className="mt-2 text-sm font-semibold tabular-nums">
                         {changeLabel(item)}
                         {item.change === null
                           ? ""
                           : ` ${METRIC_LABELS[metric]}`}
                       </p>
                       {note && (
-                        <p className="mt-1 text-muted-foreground">{note}</p>
+                        <p className="mt-2 border-t border-border/60 pt-2 text-muted-foreground">{note}</p>
                       )}
                     </div>
                   );

@@ -14,7 +14,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ChartContainer } from "@/components/ui/chart";
 import type { ChartConfig } from "@/components/ui/chart";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { chartRows, compact, dateLabel, format } from "@/lib/dashboard";
+import { chartRows, dateLabel, format } from "@/lib/dashboard";
+import { axisTickLabel, niceAxis } from "@/lib/chart-axis";
 import type { ChartRow } from "@/lib/dashboard";
 import type {
   HistoryPoint,
@@ -57,6 +58,7 @@ const HistoryPlot = memo(function HistoryPlot({
   colors,
   percent,
   maximum,
+  axisTicks,
 }: {
   rows: ChartRow[];
   series: HistoryResult["series"];
@@ -66,6 +68,7 @@ const HistoryPlot = memo(function HistoryPlot({
   colors: Map<string, string>;
   percent: boolean;
   maximum: number;
+  axisTicks: number[];
 }) {
   return (
     <ChartContainer
@@ -89,10 +92,14 @@ const HistoryPlot = memo(function HistoryPlot({
           axisLine={false}
         />
         <YAxis
-          width={44}
+          width={60}
           domain={[0, percent ? 100 : maximum]}
+          ticks={percent ? [0, 25, 50, 75, 100] : axisTicks}
           allowDataOverflow
-          tickFormatter={(value) => (percent ? `${value}%` : compact(value))}
+          interval={0}
+          tickFormatter={(value) =>
+            percent ? `${value}%` : axisTickLabel(Number(value), axisTicks)
+          }
           tickLine={false}
           axisLine={false}
         />
@@ -261,10 +268,12 @@ export function HistoryChart({
       : pointAt(result.points, selectedAt);
   const point = result.points[index];
   const label = METRIC_LABELS[metric];
-  const maximum = useMemo(
-    () => rows.reduce((peak, row) => Math.max(peak, row.total), 1),
+  const stockAxis = useMemo(
+    () => niceAxis(rows.map((row) => row.total)),
     [rows],
   );
+  // The hover hit test must use the same rounded domain as the rendered axis.
+  const maximum = stockAxis.domain[1];
   const hoveredSeries =
     hoveredColumn === null ? null : result.series[hoveredColumn];
   const hoveredValue =
@@ -317,19 +326,19 @@ export function HistoryChart({
       setAnchor({
         x:
           rect.left +
-          56 +
+          72 +
           ((Date.parse(result.points[nextIndex].timestamp) - start) /
             (end - start || 1)) *
-            (rect.width - 72),
+            (rect.width - 88),
         y: rect.top + rect.height / 2,
       });
   }
   function pointerSelection(event: { clientX: number; clientY: number }) {
     const rect = plot.current?.getBoundingClientRect();
-    if (!rect || rect.width <= 72 || !result.points.length) return null;
+    if (!rect || rect.width <= 88 || !result.points.length) return null;
     const x = Math.max(
       0,
-      Math.min(1, (event.clientX - rect.left - 56) / (rect.width - 72)),
+      Math.min(1, (event.clientX - rect.left - 72) / (rect.width - 88)),
     );
     const next = pointAt(result.points, start + x * (end - start));
     const stock = result.points[next];
@@ -511,12 +520,13 @@ export function HistoryChart({
                   colors={colors}
                   percent={percent}
                   maximum={maximum}
+                  axisTicks={stockAxis.ticks}
                 />
                 {selectedAt !== null && (
                   <>
                     <div
                       aria-hidden="true"
-                      className="pointer-events-none absolute top-3 right-4 bottom-[38px] left-[56px]"
+                      className="pointer-events-none absolute top-3 right-4 bottom-[38px] left-[72px]"
                     >
                       <div
                         className="absolute inset-y-0 border-l border-dashed border-foreground/70"
