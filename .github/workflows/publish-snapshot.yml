@@ -1,0 +1,89 @@
+name: Publish verified snapshots only
+
+on:
+  workflow_dispatch:
+    inputs:
+      snapshot_commit:
+        description: 'Immutable commit containing root public-stats.json and private-metrics.json (40 lowercase hex)'
+        required: true
+        type: string
+      public_stats_blob_sha:
+        description: 'Sanitized public-stats.json Git blob SHA (40 lowercase hex)'
+        required: true
+        type: string
+      private_metrics_blob_sha:
+        description: 'Current durable tally-state/private-metrics.json Git blob SHA (40 lowercase hex)'
+        required: true
+        type: string
+
+concurrency:
+  group: poly-tally-publish
+  cancel-in-progress: false
+  queue: max
+
+permissions:
+  contents: read
+
+env:
+  SNAPSHOT_COMMIT: ${{ inputs.snapshot_commit }}
+  PUBLIC_STATS_BLOB_SHA: ${{ inputs.public_stats_blob_sha }}
+  PRIVATE_METRICS_BLOB_SHA: ${{ inputs.private_metrics_blob_sha }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install locked dashboard dependencies
+        run: npm ci
+      - name: Validate immutable sanitized inputs and current durable selection
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/publish-snapshot.mjs stage
+      - name: Build the original dashboard from the selected snapshots
+        env:
+          POLY_TALLY_REQUIRE_PRIVATE: 'true'
+          POLY_TALLY_EXTERNAL_PRIVATE_BLOB_SHA: ${{ inputs.private_metrics_blob_sha }}
+        run: node scripts/build-site.mjs
+      - name: Verify minimal Pages output and recheck durable private selection
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          node scripts/publish-snapshot.mjs verify-site
+          node scripts/publish-snapshot.mjs check-current
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: site
+          retention-days: 1
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Refuse a superseded durable private snapshot immediately before deployment
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/publish-snapshot.mjs check-current
+      - name: Deploy GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

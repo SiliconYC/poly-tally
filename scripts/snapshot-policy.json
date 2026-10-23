@@ -1,0 +1,7 @@
+{
+  "datasetEpoch": "source-only-no-eigen-2026-10-22-v1",
+  "rulesVersion": "a44cf7a0a43f21e3",
+  "lineageVersion": "643afddb50778cd9",
+  "collectorVersion": "poly-tally/4;pygments/2.21.0",
+  "configSha256": "90894003cd05cb88ff97e8d9a6afa44dc71190a05ff1d21c2aa43a2be665d5a3"
+}
