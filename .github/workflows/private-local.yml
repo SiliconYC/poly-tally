@@ -2,8 +2,6 @@ name: Update private metrics on persistent runner
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: '47 0,12 * * *'
 
 permissions:
   contents: write
