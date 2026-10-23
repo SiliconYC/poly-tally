@@ -14,7 +14,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ChartContainer } from "@/components/ui/chart";
 import type { ChartConfig } from "@/components/ui/chart";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { chartRows, compact, dateLabel, format } from "@/lib/dashboard";
+import { chartRows, dateLabel, format } from "@/lib/dashboard";
+import { axisTickLabel, niceAxis } from "@/lib/chart-axis";
 import type { ChartRow } from "@/lib/dashboard";
 import type {
   HistoryPoint,
@@ -57,6 +58,7 @@ const HistoryPlot = memo(function HistoryPlot({
   colors,
   percent,
   maximum,
+  axisTicks,
 }: {
   rows: ChartRow[];
   series: HistoryResult["series"];
@@ -66,6 +68,7 @@ const HistoryPlot = memo(function HistoryPlot({
   colors: Map<string, string>;
   percent: boolean;
   maximum: number;
+  axisTicks: number[];
 }) {
   return (
     <ChartContainer
@@ -91,8 +94,12 @@ const HistoryPlot = memo(function HistoryPlot({
         <YAxis
           width={44}
           domain={[0, percent ? 100 : maximum]}
+          ticks={percent ? [0, 25, 50, 75, 100] : axisTicks}
           allowDataOverflow
-          tickFormatter={(value) => (percent ? `${value}%` : compact(value))}
+          interval={0}
+          tickFormatter={(value) =>
+            percent ? `${value}%` : axisTickLabel(Number(value), axisTicks)
+          }
           tickLine={false}
           axisLine={false}
         />
@@ -261,10 +268,12 @@ export function HistoryChart({
       : pointAt(result.points, selectedAt);
   const point = result.points[index];
   const label = METRIC_LABELS[metric];
-  const maximum = useMemo(
-    () => rows.reduce((peak, row) => Math.max(peak, row.total), 1),
+  const stockAxis = useMemo(
+    () => niceAxis(rows.map((row) => row.total)),
     [rows],
   );
+  // The hover hit test must use the same rounded domain as the rendered axis.
+  const maximum = stockAxis.domain[1];
   const hoveredSeries =
     hoveredColumn === null ? null : result.series[hoveredColumn];
   const hoveredValue =
@@ -511,6 +520,7 @@ export function HistoryChart({
                   colors={colors}
                   percent={percent}
                   maximum={maximum}
+                  axisTicks={stockAxis.ticks}
                 />
                 {selectedAt !== null && (
                   <>
