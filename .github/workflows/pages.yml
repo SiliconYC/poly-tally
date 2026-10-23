@@ -1,11 +1,6 @@
 name: Collect and publish Pages
 
 on:
-  push:
-    branches: [dev]
-  schedule:
-    # UTC 07:00 / 15:00 / 23:00 = 台北时间 15:00 / 23:00 / 次日 07:00（UTC+8）。
-    - cron: '0 7,15,23 * * *'
   workflow_dispatch:
     inputs:
       external_private_blob_sha:
