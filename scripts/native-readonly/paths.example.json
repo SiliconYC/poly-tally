@@ -1,0 +1,5 @@
+{
+  "patFile": "/absolute/private/location/github.pat",
+  "cacheRoot": "/absolute/private/cache/native-git",
+  "diagnostics": "/absolute/private/logs/helper-diagnostics.jsonl"
+}
