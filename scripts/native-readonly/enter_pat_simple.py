@@ -8,7 +8,17 @@ from pathlib import Path
 import resource
 import stat
 PAT=Path(pwd.getpwuid(os.getuid()).pw_dir)/'.local/share/poly-tally-private/github.pat'
-META=PAT.parent/'metadata.json'
+PATH_CONFIG=Path(__file__).resolve().parent/'paths.local.json'
+if PATH_CONFIG.exists():
+    configured=json.loads(PATH_CONFIG.read_text())
+    if not isinstance(configured,dict) or set(configured)-{'patFile','cacheRoot','diagnostics'}:
+        raise ValueError('invalid local path configuration')
+    if 'patFile' in configured:
+        value=configured['patFile']
+        if not isinstance(value,str) or not Path(value).is_absolute():
+            raise ValueError('local paths must be absolute')
+        PAT=Path(value)
+META=PAT.parent/'metadata.json' 
 
 def safe_empty_file():
     directory=PAT.parent.lstat()

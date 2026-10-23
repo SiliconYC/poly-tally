@@ -22,6 +22,20 @@ GIT = shutil.which('git') or '/usr/bin/git'
 OWNER = 'SiliconYC'
 EXPIRES_AT = None
 DIAGNOSTICS = USER_HOME / '.local/state/poly-tally/helper-diagnostics.jsonl'
+# Optional reviewed NONSECRET path configuration next to this installed script.
+# The path is fixed; no CLI/environment arbitrary-secret-path input is accepted.
+PATH_CONFIG = Path(__file__).resolve().parent / 'paths.local.json'
+if PATH_CONFIG.exists():
+    configured = json.loads(PATH_CONFIG.read_text())
+    if not isinstance(configured, dict) or set(configured) - {'patFile','cacheRoot','diagnostics'}:
+        raise ValueError('invalid local path configuration')
+    for key, variable in [('patFile','PAT_FILE'),('cacheRoot','CACHE_ROOT'),('diagnostics','DIAGNOSTICS')]:
+        if key in configured:
+            value = configured[key]
+            if not isinstance(value,str) or not Path(value).is_absolute():
+                raise ValueError('local paths must be absolute')
+            globals()[variable] = Path(value)
+
 
 class CredentialError(ValueError):
     pass

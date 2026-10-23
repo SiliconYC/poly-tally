@@ -85,6 +85,14 @@ class Tests(unittest.TestCase):
  def test_multi_valued_extensions(self):
   raw=RAW.rstrip(b'\n')+b'\nwwwauth[]=Basic FAKE\nwwwauth[]=Bearer FAKE\ncapability[]=one\ncapability[]=two\n\n'
   self.assertEqual(self.invoke(raw=raw)[0],0);self.assertNotIn(b'Basic FAKE',h.DIAGNOSTICS.read_bytes())
+ def test_nonsecret_path_config_shared_by_helper_and_gui(self):
+  config={'patFile':str(self.file),'cacheRoot':str(self.root/'cache'),'diagnostics':str(self.root/'diag')}
+  (self.root/'paths.local.json').write_text(json.dumps(config))
+  for filename in ['readonly_git.py','enter_pat_simple.py']:
+   copy=self.root/filename;copy.write_text((HERE/filename).read_text())
+   spec=importlib.util.spec_from_file_location('configured_'+filename.replace('.','_'),copy)
+   module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+   self.assertEqual(getattr(module,'PAT_FILE',getattr(module,'PAT',None)),self.file)
  def test_duplicate_core_diagnostic(self):
   self.assertEqual(self.invoke(raw=RAW.replace(b'protocol=https',b'protocol=https\nprotocol=http')),(1,b''));self.assertIn(b'DUPLICATE_CORE_FIELD',h.DIAGNOSTICS.read_bytes())
 if __name__=='__main__':unittest.main(verbosity=2)
