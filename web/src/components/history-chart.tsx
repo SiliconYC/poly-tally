@@ -92,7 +92,7 @@ const HistoryPlot = memo(function HistoryPlot({
           axisLine={false}
         />
         <YAxis
-          width={44}
+          width={60}
           domain={[0, percent ? 100 : maximum]}
           ticks={percent ? [0, 25, 50, 75, 100] : axisTicks}
           allowDataOverflow
@@ -326,19 +326,19 @@ export function HistoryChart({
       setAnchor({
         x:
           rect.left +
-          56 +
+          72 +
           ((Date.parse(result.points[nextIndex].timestamp) - start) /
             (end - start || 1)) *
-            (rect.width - 72),
+            (rect.width - 88),
         y: rect.top + rect.height / 2,
       });
   }
   function pointerSelection(event: { clientX: number; clientY: number }) {
     const rect = plot.current?.getBoundingClientRect();
-    if (!rect || rect.width <= 72 || !result.points.length) return null;
+    if (!rect || rect.width <= 88 || !result.points.length) return null;
     const x = Math.max(
       0,
-      Math.min(1, (event.clientX - rect.left - 56) / (rect.width - 72)),
+      Math.min(1, (event.clientX - rect.left - 72) / (rect.width - 88)),
     );
     const next = pointAt(result.points, start + x * (end - start));
     const stock = result.points[next];
@@ -526,7 +526,7 @@ export function HistoryChart({
                   <>
                     <div
                       aria-hidden="true"
-                      className="pointer-events-none absolute top-3 right-4 bottom-[38px] left-[56px]"
+                      className="pointer-events-none absolute top-3 right-4 bottom-[38px] left-[72px]"
                     >
                       <div
                         className="absolute inset-y-0 border-l border-dashed border-foreground/70"
