@@ -95,3 +95,81 @@ def test_invalid_url_parser_does_not_reflect_untrusted_secret_like_input():
         with pytest.raises(ValueError) as error:
             gateway_config({**ENV,'POLY_TALLY_GATEWAY_URL':url})
         assert 'ghp_FAKE_SENTINEL' not in str(error.value)
+
+
+def test_gateway_git_cannot_inherit_other_credential_sources_or_disable_tls(tmp_path):
+    incoming = {**ENV, 'HOME': str(tmp_path), 'XDG_CONFIG_HOME': str(tmp_path),
+                'GIT_SSL_NO_VERIFY': '1', 'GIT_ASKPASS': '/fake/spy', 'SSH_ASKPASS': '/fake/spy',
+                'NETRC': str(tmp_path / 'fake.netrc'), 'CURL_HOME': str(tmp_path),
+                'GIT_SSL_CERT': '/fake/client.pem', 'GIT_SSL_KEY': '/fake/client.key'}
+    isolated = git_environment(incoming)
+    assert isolated['GIT_ASKPASS'] == '/bin/false'
+    assert isolated['SSH_ASKPASS'] == '/bin/false'
+    # /dev/null is a non-directory on the supported Linux runner: neither Git nor
+    # libcurl can find .netrc/global credential files below it.
+    assert isolated['HOME'] == isolated['XDG_CONFIG_HOME'] == '/dev/null'
+    for key in ('GIT_SSL_NO_VERIFY', 'NETRC', 'CURL_HOME', 'GIT_SSL_CERT', 'GIT_SSL_KEY'):
+        assert key not in isolated
+
+
+def test_real_git_401_never_uses_fake_askpass_helper_or_netrc(tmp_path):
+    import ssl
+    import subprocess
+    import threading
+    from http.server import HTTPServer, BaseHTTPRequestHandler
+
+    # No inherited process environment or real config/credential paths. Every
+    # possible source below is an explicitly invented temporary fixture.
+    safe = {'PATH': '/usr/bin:/bin', 'HOME': str(tmp_path), 'XDG_CONFIG_HOME': str(tmp_path),
+            'GIT_CONFIG_NOSYSTEM': '1', 'GIT_CONFIG_GLOBAL': '/dev/null', 'GIT_TERMINAL_PROMPT': '0'}
+    marker = tmp_path / 'spy-called'
+    spy = tmp_path / 'fake-credential-spy'
+    spy.write_text(f'#!/bin/sh\nprintf called >> "{marker}"\nexit 1\n')
+    spy.chmod(0o700)
+    netrc = tmp_path / '.netrc'
+    netrc.write_text('machine localhost login fake-netrc-user password fake-netrc-password\n')
+    netrc.chmod(0o600)
+    cert, key = tmp_path / 'fixture.crt', tmp_path / 'fixture.key'
+    subprocess.run(['openssl', 'req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '1',
+                    '-subj', '/CN=localhost', '-addext', 'subjectAltName=DNS:localhost',
+                    '-keyout', str(key), '-out', str(cert)], env=safe, check=True,
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    requests, basic_seen = [], []
+    class Unauthorized(BaseHTTPRequestHandler):
+        def do_GET(self):
+            requests.append(True)
+            basic_seen.append((self.headers.get('Authorization') or '').startswith('Basic '))
+            self.send_response(401)
+            self.send_header('WWW-Authenticate', 'Basic realm="fake-only"')
+            self.send_header('Content-Length', '0')
+            self.end_headers()
+        def log_message(self, *_):
+            pass
+    server = HTTPServer(('127.0.0.1', 0), Unauthorized)
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    context.load_cert_chain(cert, key)
+    server.socket = context.wrap_socket(server.socket, server_side=True)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        repo = tmp_path / 'fixture.git'
+        subprocess.run(['git', 'init', '--bare', str(repo)], env=safe, check=True,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        for name, value in [('core.askPass', str(spy)), ('credential.helper', f'!{spy}'), ('http.sslVerify', 'false')]:
+            subprocess.run(['git', '--git-dir', str(repo), 'config', name, value], env=safe, check=True)
+        isolated = git_environment({**safe, **ENV, 'GIT_ASKPASS': str(spy), 'SSH_ASKPASS': str(spy),
+                                    'GIT_SSL_NO_VERIFY': '1', 'NETRC': str(netrc)})
+        effective = subprocess.run(['git', '--git-dir', str(repo), 'config', '--bool', '--get', 'http.sslVerify'],
+                                   env=isolated, check=True, capture_output=True)
+        assert effective.stdout == b'true\n'
+        result = subprocess.run(['git', '--git-dir', str(repo), '-c', f'http.sslCAInfo={cert}', 'ls-remote',
+                                 f'https://localhost:{server.server_port}/fixture.git'], env=isolated,
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=15)
+        assert result.returncode != 0
+        assert requests, 'trusted local HTTPS fixture must actually return 401'
+        assert not marker.exists(), 'no AskPass/helper may run after authentication failure'
+        assert not any(basic_seen), 'no fake .netrc credential may be sent'
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join()

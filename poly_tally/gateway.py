@@ -89,9 +89,13 @@ def git_environment(env=None):
     if config is None:
         return env
     origin, password = config
-    env = {key: value for key, value in env.items() if not key.startswith(('GIT_CONFIG', 'GIT_TRACE', 'GIT_CURL_VERBOSE')) and key not in ('GIT_SSL_NO_VERIFY','GIT_ASKPASS','SSH_ASKPASS','GIT_PROXY_COMMAND')}
-    env.update(GIT_TERMINAL_PROMPT='0', GIT_CONFIG_NOSYSTEM='1', GIT_CONFIG_GLOBAL='/dev/null', GIT_ALLOW_PROTOCOL='https')
-    settings = [('credential.helper', ''), ('http.followRedirects', 'false'), ('http.proxy', ''),
+    env = {key: value for key, value in env.items() if not key.startswith(('GIT_CONFIG', 'GIT_TRACE', 'GIT_CURL_VERBOSE', 'GIT_SSL_')) and key not in ('GIT_ASKPASS', 'SSH_ASKPASS', 'GIT_PROXY_COMMAND', 'NETRC', 'CURL_HOME')}
+    # Linux-only transport: /dev/null cannot contain .netrc/config files. Merely
+    # unsetting ASKPASS would fall back to a repository-local core.askPass.
+    env.update(HOME='/dev/null', XDG_CONFIG_HOME='/dev/null', GIT_ASKPASS='/bin/false', SSH_ASKPASS='/bin/false',
+               GIT_TERMINAL_PROMPT='0', GIT_CONFIG_NOSYSTEM='1', GIT_CONFIG_GLOBAL='/dev/null', GIT_ALLOW_PROTOCOL='https')
+    settings = [('credential.helper', ''), ('credential.interactive', 'false'), ('core.askPass', '/bin/false'),
+                ('http.followRedirects', 'false'), ('http.proxy', ''),
                 ('http.sslVerify', 'true'), ('http.extraheader', ''), (f'http.{origin}/.extraheader', f'Authorization: Bearer {password}')]
     env['GIT_CONFIG_COUNT'] = str(len(settings))
     for i, (key, value) in enumerate(settings):

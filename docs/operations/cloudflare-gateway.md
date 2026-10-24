@@ -38,6 +38,7 @@ Worker 拒绝四个值中的任何复用；客户端拒绝明显 GitHub token �
 所有者用安全输入流程创建并确认，不要求用户在 shell 中 `export` 真口令。
 支持临时 `POLY_TALLY_GATEWAY_PASSWORD` 注入，但不能和文件入口并存。
 一旦启用 gateway，`GH_TOKEN`、`GITHUB_TOKEN`、`POLY_TALLY_TOKEN` 任何键存在都会停止；不查旧 PAT 文件，不调用 credential helper。
+Linux Git 子进程固定禁用 AskPass/helper/交互认证，以不可作为目录的 `/dev/null` 隔离 HOME/XDG，清除 NETRC 与继承的 Git TLS 变量，并强制证书验证；认证失败不得回退现有 `.netrc`、客户端证书或其他密码来源。
 
 ## 发布协议与 FREE 上限
 
