@@ -78,6 +78,7 @@ export function timeAxisTicks(start: number, end: number, plotWidth: number): Ti
 
   const width = Math.max(100, Number.isFinite(plotWidth) ? plotWidth : 320);
   const maxLabels = Math.max(2, Math.min(8, Math.floor(width / 84)));
+  let sparse: TimeAxis | null = null;
   for (const step of STEPS) {
     // Daily windows should not produce densely repeated "HH:mm" labels.
     if (end - start >= 2 * DAY && (step.unit === "minute" || step.unit === "hour")) continue;
@@ -86,13 +87,25 @@ export function timeAxisTicks(start: number, end: number, plotWidth: number): Ti
     if (end - start >= 75 * DAY && (step.unit === "minute" || step.unit === "hour" || step.unit === "day")) continue;
     if (end - start >= 3 * 365 * DAY && step.unit === "month") continue;
     const ticks = alignedTicks(start, end, step);
-    if (ticks.length < 2 || ticks.length > maxLabels) continue;
-    const minimumDistance = (ticks[1] - ticks[0]) / (end - start) * width;
     const labelWidth = step.unit === "minute" || step.unit === "hour" ? 90 : 62;
+    // At very narrow widths, evenly thin a slightly denser calendar series
+    // instead of falling back to arbitrary start/end timestamps.
+    if (ticks.length > maxLabels && ticks.length <= maxLabels * 2 && !sparse) {
+      const sampled = Array.from({ length: maxLabels }, (_, index) =>
+        ticks[Math.round((index * (ticks.length - 1)) / (maxLabels - 1))],
+      );
+      const smallestGap = Math.min(
+        ...sampled.slice(1).map((value, index) => value - sampled[index]),
+      );
+      if ((smallestGap / (end - start)) * width >= labelWidth)
+        sparse = { ticks: sampled, unit: step.unit };
+    }
+    if (ticks.length < 2 || ticks.length > maxLabels) continue;
+    const minimumDistance = ((ticks[1] - ticks[0]) / (end - start)) * width;
     if (minimumDistance >= labelWidth) return { ticks, unit: step.unit };
   }
-  // Short windows may not contain two natural boundaries. Preserve exact dates.
-  return { ticks: [start, end], unit: end - start < DAY ? "hour" : "day" };
+  // Only as a last resort for tiny ranges without two usable UTC boundaries.
+  return sparse ?? { ticks: [start, end], unit: end - start < DAY ? "hour" : "day" };
 }
 
 /** The axis uses UTC, like snapshot details, even in non-UTC browsers. */
