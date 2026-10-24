@@ -79,6 +79,10 @@ export function timeAxisTicks(start: number, end: number, plotWidth: number): Ti
   const width = Math.max(100, Number.isFinite(plotWidth) ? plotWidth : 320);
   const maxLabels = Math.max(2, Math.min(8, Math.floor(width / 84)));
   for (const step of STEPS) {
+    // Wider history windows read better with calendar months / years than
+    // a dense stream of fortnight labels.
+    if (end - start >= 75 * DAY && (step.unit === "minute" || step.unit === "hour" || step.unit === "day")) continue;
+    if (end - start >= 3 * 365 * DAY && step.unit === "month") continue;
     const ticks = alignedTicks(start, end, step);
     if (ticks.length < 2 || ticks.length > maxLabels) continue;
     const minimumDistance = (ticks[1] - ticks[0]) / (end - start) * width;
