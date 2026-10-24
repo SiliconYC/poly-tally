@@ -2,16 +2,15 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import worker from "../src/handler.mjs";
 const env = {
-  GATEWAY_PASSWORD: "fixture-proxy-password-not-a-real-secret-123456789",
-  READ_PAT: "fake-read-pat",
-  WRITE_PAT: "fake-write-pat",
-  GATEWAY_RECEIPT_KEY: "fake-receipt-key-not-real-12345678901234567890",
+  GATEWAY_KEY: "fixture-proxy-password-not-a-real-secret-123456789",
+  GITHUB_READ_TOKEN: "fake-read-pat",
+  GITHUB_PUBLISH_TOKEN: "fake-write-pat",
   ALLOWED_REPOSITORIES: '["SiliconYC/poly-tally","SiliconYC/private-test"]',
 };
 const request = (path, options = {}) =>
   new Request(`https://gateway.example${path}`, {
     headers: {
-      Authorization: `Bearer ${env.GATEWAY_PASSWORD}`,
+      Authorization: `Bearer ${env.GATEWAY_KEY}`,
       ...options.headers,
     },
     ...options,
@@ -65,6 +64,19 @@ test("paths, methods, query duplicates, encoded traversal, receive-pack and unkn
     ["/api/repos/other/repo", "GET"],
     ["/api/repos/SiliconYC/poly-tally/contents/x", "GET"],
     ["/api/repos/SiliconYC/poly-tally", "POST"],
+    ["/api/repos/SiliconYC/poly-tally/git/blobs", "POST"],
+    ["/api/repos/SiliconYC/poly-tally/git/trees", "POST"],
+    ["/api/repos/SiliconYC/poly-tally/git/commits", "POST"],
+    ["/api/repos/SiliconYC/poly-tally/git/refs", "POST"],
+    ["/api/repos/SiliconYC/poly-tally/git/refs/heads/tally-state", "PATCH"],
+    [
+      "/api/repos/SiliconYC/poly-tally/actions/workflows/pages.yml/dispatches",
+      "POST",
+    ],
+    [
+      "/api/repos/SiliconYC/poly-tally/actions/workflows/publish-snapshot.yml/dispatches",
+      "POST",
+    ],
     ["/git/SiliconYC/poly-tally.git/git-receive-pack", "POST"],
     ["/git/SiliconYC/poly-tally.git/info/refs?service=git-receive-pack", "GET"],
     [
@@ -127,7 +139,7 @@ test("smart Git response streams without buffering and strips all unapproved hea
       method: "POST",
       body: "0000",
       headers: {
-        Authorization: `Bearer ${env.GATEWAY_PASSWORD}`,
+        Authorization: `Bearer ${env.GATEWAY_KEY}`,
         "Content-Type": "application/x-git-upload-pack-request",
         "Git-Protocol": "version=2",
         "X-Injected": "bad",
@@ -287,18 +299,14 @@ test("public health discloses no configuration and never makes an upstream reque
     { fetcher: () => assert.fail() },
   );
   assert.equal(r.status, 200);
-  assert.deepEqual(await r.json(), {
-    service: "poly-tally-gateway",
-    version: 1,
-  });
+  assert.equal(await r.text(), "poly-tally-gateway-ok");
+  assert.equal(r.headers.get("X-Poly-Tally-Protocol"), "2");
 });
-test("misconfigured shared read/write/proxy/receipt secrets fail closed without revealing values", async () => {
+test("misconfigured shared read/write/proxy secrets fail closed without revealing values", async () => {
   for (const duplicate of [
-    { WRITE_PAT: env.READ_PAT },
-    { READ_PAT: env.GATEWAY_PASSWORD },
-    { WRITE_PAT: env.GATEWAY_PASSWORD },
-    { GATEWAY_RECEIPT_KEY: env.READ_PAT },
-    { GATEWAY_RECEIPT_KEY: env.GATEWAY_PASSWORD },
+    { GITHUB_PUBLISH_TOKEN: env.GITHUB_READ_TOKEN },
+    { GITHUB_READ_TOKEN: env.GATEWAY_KEY },
+    { GITHUB_PUBLISH_TOKEN: env.GATEWAY_KEY },
   ]) {
     const r = await worker.fetch(
       request("/api/users/SiliconYC"),
@@ -322,4 +330,29 @@ test("double-encoded branch components cannot survive validation for upstream re
     );
     assert.equal(result.status, 403);
   }
+});
+
+test("Git upstream mid-stream failure propagates without buffering or automatic replay", async () => {
+  let count = 0;
+  const result = await run(
+    "/git/SiliconYC/poly-tally.git/info/refs?service=git-upload-pack",
+    () => {
+      count++;
+      return new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.error(new Error("fake upstream disconnect"));
+          },
+        }),
+        {
+          headers: {
+            "Content-Type": "application/x-git-upload-pack-advertisement",
+          },
+        },
+      );
+    },
+  );
+  assert.equal(result.status, 200);
+  await assert.rejects(result.arrayBuffer(), /fake upstream disconnect/);
+  assert.equal(count, 1);
 });

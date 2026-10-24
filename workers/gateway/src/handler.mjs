@@ -3,10 +3,7 @@ import { policy } from "./policy.mjs";
 import { GatewayError, read, response } from "./read.mjs";
 const encoder = new TextEncoder();
 async function authorized(request, env) {
-  if (
-    typeof env.GATEWAY_PASSWORD !== "string" ||
-    env.GATEWAY_PASSWORD.length < 40
-  )
+  if (typeof env.GATEWAY_KEY !== "string" || env.GATEWAY_KEY.length < 40)
     return false;
   const header = request.headers.get("Authorization") ?? "";
   if (header.length > 512) return false;
@@ -14,7 +11,7 @@ async function authorized(request, env) {
     crypto.subtle.digest("SHA-256", encoder.encode(header)),
     crypto.subtle.digest(
       "SHA-256",
-      encoder.encode(`Bearer ${env.GATEWAY_PASSWORD}`),
+      encoder.encode(`Bearer ${env.GATEWAY_KEY}`),
     ),
   ]);
   const a = new Uint8Array(actual),
@@ -26,23 +23,27 @@ async function authorized(request, env) {
 export default {
   async fetch(request, env, ctx = {}) {
     try {
-      if (new URL(request.url).protocol !== "https:" && !env.LOCAL_TEST_ONLY)
+      if (new URL(request.url).protocol !== "https:")
         return response({ error: "https_required" }, 400);
       const url = new URL(request.url);
       if (request.method === "GET" && url.pathname === "/health" && !url.search)
-        return response({ service: "poly-tally-gateway", version: 1 });
+        return new Response("poly-tally-gateway-ok", {
+          headers: {
+            "Cache-Control": "no-store",
+            "X-Poly-Tally-Protocol": "2",
+            "X-Content-Type-Options": "nosniff",
+          },
+        });
       const secrets = [
-        env.READ_PAT,
-        env.WRITE_PAT,
-        env.GATEWAY_PASSWORD,
-        env.GATEWAY_RECEIPT_KEY,
+        env.GITHUB_READ_TOKEN,
+        env.GITHUB_PUBLISH_TOKEN,
+        env.GATEWAY_KEY,
       ];
       if (
         secrets.some((value) => typeof value !== "string" || !value) ||
-        new Set(secrets).size !== 4 ||
-        env.GATEWAY_PASSWORD.length < 40 ||
-        env.GATEWAY_RECEIPT_KEY.length < 40 ||
-        /^(?:gh[pousr]_|github_pat_)/i.test(env.GATEWAY_PASSWORD)
+        new Set(secrets).size !== 3 ||
+        !/^[!-~]{40,256}$/.test(env.GATEWAY_KEY) ||
+        /^(?:gh[pousr]_|github_pat_)/i.test(env.GATEWAY_KEY)
       )
         return response({ error: "gateway_not_configured" }, 503);
       if (!(await authorized(request, env)))
@@ -53,7 +54,6 @@ export default {
           env,
           ctx.fetcher ?? fetch,
           ctx.policy ?? policy,
-          ctx.bootstrap,
         );
       return await read(request, env, ctx.fetcher ?? fetch);
     } catch (error) {

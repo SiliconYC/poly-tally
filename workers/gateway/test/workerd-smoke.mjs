@@ -6,6 +6,8 @@ import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { randomBytes, createHash } from "node:crypto";
+import { createServer } from "node:http";
+import { Readable } from "node:stream";
 import { Miniflare, convertV4MiniflareOptions } from "miniflare";
 import { bootstrap, policy } from "./synthetic-bootstrap.mjs";
 import { publishGateway } from "../../../scripts/gateway-publish.mjs";
@@ -18,10 +20,9 @@ const env = {
   GIT_TERMINAL_PROMPT: "0",
 };
 const fake = {
-  READ_PAT: "fake-read-credential",
-  WRITE_PAT: "fake-write-credential",
-  GATEWAY_PASSWORD: "fake-proxy-password-only-1234567890123456789012345",
-  GATEWAY_RECEIPT_KEY: "fake-signing-key-only-1234567890123456789012345678",
+  GITHUB_READ_TOKEN: "fake-read-credential",
+  GITHUB_PUBLISH_TOKEN: "fake-write-credential",
+  GATEWAY_KEY: "fake-proxy-password-only-1234567890123456789012345",
   ALLOWED_REPOSITORIES: '["SiliconYC/*"]',
   LOCAL_TEST_ONLY: "true",
 };
@@ -31,7 +32,7 @@ const git = (args, options = {}) =>
     stdio: ["pipe", "pipe", "pipe"],
     ...options,
   });
-let mf;
+let mf, bridge;
 let stateRef = bootstrap.sourceCommit,
   stateTree = "2".repeat(40),
   stateEntries = bootstrap.baselines.map((b) => ({
@@ -41,13 +42,18 @@ let stateRef = bootstrap.sourceCommit,
     type: "blob",
     size: Buffer.byteLength(JSON.stringify(b.data)),
   }));
-const blobs = new Map();
+const blobs = new Map(
+  bootstrap.baselines.map((b) => [b.sha, JSON.stringify(b.data)]),
+);
 let dispatched = 0,
   publicationRequests = 0;
 async function publicationUpstream(request, url) {
   assert.equal(
     request.headers.get("Authorization"),
-    "Bearer " + fake.WRITE_PAT,
+    "Bearer " +
+      (request.method === "GET"
+        ? fake.GITHUB_READ_TOKEN
+        : fake.GITHUB_PUBLISH_TOKEN),
   );
   publicationRequests++;
   const path = url.pathname.replace("/repos/SiliconYC/poly-tally", "");
@@ -60,11 +66,8 @@ async function publicationUpstream(request, url) {
       return Response.json({ tree: stateEntries, truncated: false });
     if (path.startsWith("/git/blobs/")) {
       const sha = path.split("/").at(-1);
-      return Response.json({
-        sha,
-        encoding: "base64",
-        content: Buffer.from(blobs.get(sha)).toString("base64"),
-      });
+      assert.match(request.headers.get("Accept"), /raw/);
+      return new Response(blobs.get(sha));
     }
   }
   const body = await request.json();
@@ -127,22 +130,6 @@ try {
   git(["-C", source, "commit", "-m", "fixture"]);
   const expected = git(["-C", source, "rev-parse", "HEAD"]).toString().trim();
   git(["clone", "--bare", source, join(project, "SiliconYC/poly-tally.git")]);
-  execFileSync(
-    process.execPath,
-    [
-      resolve(import.meta.dirname, "../node_modules/wrangler/bin/wrangler.js"),
-      "deploy",
-      resolve(import.meta.dirname, "worker-fixture.mjs"),
-      "--dry-run",
-      "--outdir",
-      join(directory, "bundle"),
-    ],
-    {
-      cwd: resolve(import.meta.dirname, ".."),
-      env: { ...env, WRANGLER_SEND_METRICS: "false" },
-      stdio: ["ignore", "pipe", "pipe"],
-    },
-  );
   mf = new Miniflare(
     convertV4MiniflareOptions({
       host: "127.0.0.1",
@@ -151,10 +138,12 @@ try {
         {
           name: "gateway",
           modules: true,
-          modulesRoot: join(directory, "bundle"),
-          scriptPath: join(directory, "bundle/worker-fixture.js"),
+          modulesRoot: resolve(import.meta.dirname, "../../.."),
+          scriptPath: resolve(
+            import.meta.dirname,
+            "../../../poly-tally-gateway-worker.js",
+          ),
           compatibilityDate: "2026-10-24",
-          compatibilityFlags: ["nodejs_compat"],
           bindings: fake,
           outboundService: async (request) => {
             const url = new URL(request.url);
@@ -167,7 +156,7 @@ try {
             );
             assert.equal(
               request.headers.get("Authorization"),
-              "Basic " + btoa("x-access-token:" + fake.READ_PAT),
+              "Basic " + btoa("x-access-token:" + fake.GITHUB_READ_TOKEN),
             );
             upstreamRequests++;
             if (url.pathname.endsWith("git-upload-pack")) uploadPackRequests++;
@@ -245,13 +234,37 @@ try {
       ],
     }),
   );
-  const base = await mf.ready;
-  const health = await mf.dispatchFetch(new URL("/health", base));
+  await mf.ready;
+  // Test-only loopback bridge supplies virtual HTTPS to the UNCHANGED production
+  // bundle. Production HTTPS enforcement is never disabled by a binding.
+  bridge = createServer(async (req, res) => {
+    try {
+      const response = await mf.dispatchFetch(
+        `https://gateway.example${req.url}`,
+        {
+          method: req.method,
+          headers: req.headers,
+          ...(req.method === "POST"
+            ? { body: Readable.toWeb(req), duplex: "half" }
+            : {}),
+        },
+      );
+      res.writeHead(response.status, Object.fromEntries(response.headers));
+      if (response.body) Readable.fromWeb(response.body).pipe(res);
+      else res.end();
+    } catch {
+      res.writeHead(502);
+      res.end();
+    }
+  });
+  await new Promise((resolve) => bridge.listen(0, "127.0.0.1", resolve));
+  const base = new URL(`http://127.0.0.1:${bridge.address().port}/`);
+  const health = await mf.dispatchFetch("https://gateway.example/health");
   assert.equal(health.status, 200);
   const unauthorized = await mf.dispatchFetch(
     new URL(
       "/git/SiliconYC/poly-tally.git/info/refs?service=git-upload-pack",
-      base,
+      "https://gateway.example",
     ),
   );
   assert.equal(unauthorized.status, 401);
@@ -261,7 +274,7 @@ try {
     ...env,
     GIT_CONFIG_COUNT: "1",
     GIT_CONFIG_KEY_0: `http.${base.origin}/.extraheader`,
-    GIT_CONFIG_VALUE_0: `Authorization: Bearer ${fake.GATEWAY_PASSWORD}`,
+    GIT_CONFIG_VALUE_0: `Authorization: Bearer ${fake.GATEWAY_KEY}`,
   };
   const asyncGit = (args) =>
     new Promise((res, rej) => {
@@ -344,9 +357,9 @@ try {
     repository.lastSuccessAt = generatedAt;
     if (repository.status === "active") {
       const point = repository.history.at(-1);
-      repository.history = Array.from({ length: 15 }, (_, i) => ({
+      repository.history = Array.from({ length: 80 }, (_, i) => ({
         ...structuredClone(point),
-        timestamp: `2026-10-${String(i + 1).padStart(2, "0")}T23:59:59.999999Z`,
+        timestamp: `${new Date(Date.UTC(2026, 7, i + 1)).toISOString().slice(0, 10)}T23:59:59.999999Z`,
       }));
     }
   }
@@ -411,7 +424,7 @@ try {
     policy,
     env: {
       POLY_TALLY_GATEWAY_URL: "https://gateway.example",
-      POLY_TALLY_GATEWAY_PASSWORD: fake.GATEWAY_PASSWORD,
+      POLY_TALLY_GATEWAY_PASSWORD: fake.GATEWAY_KEY,
     },
     fetcher: (url, options) => mf.dispatchFetch(url, options),
   });
@@ -420,7 +433,7 @@ try {
     "https://gateway.example/publish/start",
     {
       method: "POST",
-      headers: { Authorization: `Bearer ${fake.GATEWAY_PASSWORD}` },
+      headers: { Authorization: `Bearer ${fake.GATEWAY_KEY}` },
       body: "{}",
     },
   );
@@ -456,6 +469,7 @@ try {
     }),
   );
 } finally {
+  if (bridge) await new Promise((resolve) => bridge.close(resolve));
   if (mf) await mf.dispose();
   await rm(directory, { recursive: true, force: true });
 }

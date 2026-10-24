@@ -1,9 +1,7 @@
 {
   "name": "poly-tally-gateway",
-  "main": "src/index.mjs",
+  "main": "../../poly-tally-gateway-worker.js",
   "compatibility_date": "2026-10-24",
-  "compatibility_flags": ["nodejs_compat"],
   "workers_dev": true,
   "observability": { "enabled": false },
-  "vars": { "ALLOWED_REPOSITORIES": "[\"SiliconYC/*\"]" },
 }

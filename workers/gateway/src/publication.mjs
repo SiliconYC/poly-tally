@@ -1,4 +1,9 @@
-import { Buffer } from "node:buffer";
+import { bytesHex, base64url, unbase64 } from "./encoding.mjs";
+import {
+  validateCompletePrivateMetrics,
+  validateRebuiltPrivateMetrics,
+  validatePrivateMetricsReplacement,
+} from "../../../scripts/metrics.mjs";
 import {
   GatewayError,
   reject,
@@ -28,17 +33,19 @@ const exact = (v, keys) => {
   )
     reject(400, "invalid_publication_request");
 };
-const bytesHex = (b) => Buffer.from(b).toString("hex");
 async function key(env) {
-  if (
-    typeof env.GATEWAY_RECEIPT_KEY !== "string" ||
-    env.GATEWAY_RECEIPT_KEY.length < 40 ||
-    env.GATEWAY_RECEIPT_KEY === env.GATEWAY_PASSWORD
-  )
-    reject(503, "receipt_key_not_configured");
+  if (!env.GITHUB_PUBLISH_TOKEN) reject(503, "publication_not_configured");
+  // Domain-separated from GitHub authentication and never derived from the
+  // client-known proxy key. No additional Secret, no token persistence/output.
+  const material = await crypto.subtle.digest(
+    "SHA-256",
+    encoder.encode(
+      `poly-tally/gateway/receipt-key/v2\0${env.GITHUB_PUBLISH_TOKEN}`,
+    ),
+  );
   return crypto.subtle.importKey(
     "raw",
-    encoder.encode(env.GATEWAY_RECEIPT_KEY),
+    material,
     { name: "HMAC", hash: "SHA-256" },
     false,
     ["sign", "verify"],
@@ -49,9 +56,9 @@ async function sign(value, env) {
   if (payload.length > MAX_RECEIPT_BYTES)
     reject(413, "snapshot_scope_exceeds_gateway_limit");
   const signature = await crypto.subtle.sign("HMAC", await key(env), payload);
-  return `${Buffer.from(payload).toString("base64url")}.${Buffer.from(signature).toString("base64url")}`;
+  return `${base64url(payload)}.${base64url(new Uint8Array(signature))}`;
 }
-async function verify(token, purpose, env, policy) {
+async function verify(token, purpose, env, policy, allowPriorPolicy = false) {
   if (
     typeof token !== "string" ||
     token.length > MAX_RECEIPT_BYTES * 1.4 ||
@@ -59,12 +66,12 @@ async function verify(token, purpose, env, policy) {
   )
     reject();
   const [payload, signature] = token.split("."),
-    bytes = Buffer.from(payload, "base64url");
+    bytes = unbase64(payload);
   if (
     !(await crypto.subtle.verify(
       "HMAC",
       await key(env),
-      Buffer.from(signature, "base64url"),
+      unbase64(signature),
       bytes,
     ))
   )
@@ -74,7 +81,8 @@ async function verify(token, purpose, env, policy) {
   );
   if (
     value.purpose !== purpose ||
-    value.policy !== policy.configSha256 ||
+    (value.policy !== policy.configSha256 &&
+      !(purpose === "baseline" && allowPriorPolicy)) ||
     (purpose !== "baseline" &&
       (!Number.isSafeInteger(value.expires) ||
         value.expires < Math.floor(Date.now() / 1000) ||
@@ -90,11 +98,20 @@ const receiptBase = (policy) => ({
   batch: crypto.randomUUID(),
 });
 function client(env, fetcher) {
-  if (!env.WRITE_PAT) reject(503, "publication_not_configured");
-  return async (path, method = "GET", body, missing = false) => {
+  if (!env.GITHUB_PUBLISH_TOKEN) reject(503, "publication_not_configured");
+  return async (
+    path,
+    method = "GET",
+    body,
+    missing = false,
+    rawLimit = null,
+  ) => {
     const headers = new Headers({
-      Authorization: `Bearer ${env.WRITE_PAT}`,
-      Accept: "application/vnd.github+json",
+      Authorization: `Bearer ${method === "GET" ? env.GITHUB_READ_TOKEN : env.GITHUB_PUBLISH_TOKEN}`,
+      Accept:
+        rawLimit === null
+          ? "application/vnd.github+json"
+          : "application/vnd.github.raw+json",
       "X-GitHub-Api-Version": "2022-11-28",
       "User-Agent": "poly-tally-gateway/1",
       "Accept-Encoding": "identity",
@@ -125,8 +142,22 @@ function client(env, fetcher) {
       );
     }
     if (res.status === 204) return null;
-    return jsonBody(res, 2 * MAX_UPLOAD_BYTES);
+    return rawLimit === null
+      ? jsonBody(res, 2 * MAX_UPLOAD_BYTES)
+      : boundedBytes(res, rawLimit);
   };
+}
+async function verifyGitBlob(bytes, entry) {
+  if (bytes.length !== entry.size) reject(502, "baseline_blob_size_mismatch");
+  const prefix = encoder.encode(`blob ${bytes.length}\0`),
+    framed = new Uint8Array(prefix.length + bytes.length);
+  framed.set(prefix);
+  framed.set(bytes, prefix.length);
+  if (
+    bytesHex(new Uint8Array(await crypto.subtle.digest("SHA-1", framed))) !==
+    entry.sha
+  )
+    reject(502, "baseline_blob_hash_mismatch");
 }
 async function current(api) {
   const ref = await api("/git/ref/heads/tally-state", "GET", undefined, true);
@@ -137,18 +168,85 @@ async function assertCurrent(api, state) {
   if ((await current(api)) !== state.base)
     reject(409, "durable_state_changed_restart_publication");
 }
-export async function publish(
-  request,
-  env,
-  fetcher,
-  policy,
-  bootstrapData = null,
-) {
+async function dispatchSelection(pub, commit, privateSha, env) {
+  const selected = {
+    ...pub,
+    purpose: "dispatch",
+    commit,
+    publicSha: pub.sha,
+    privateSha,
+  };
+  return response({
+    receipt: await sign(selected, env),
+    snapshotCommit: commit,
+    publicBlobSha: pub.sha,
+    privateBlobSha: privateSha,
+  });
+}
+async function recoverCommitted(api, pub, priv, env, policy) {
+  const head = await current(api);
+  if (!head || head === pub.base) reject(409, "publication_not_confirmed");
+  const commit = await api(`/git/commits/${head}`);
+  const parents = pub.base ? [pub.base] : [];
+  if (
+    !hex(commit?.tree?.sha) ||
+    !Array.isArray(commit.parents) ||
+    commit.parents.length !== parents.length ||
+    !commit.parents.every((p, i) => p.sha === parents[i])
+  )
+    reject(409, "publication_not_confirmed");
+  const tree = await api(`/git/trees/${commit.tree.sha}`);
+  if (tree.truncated || !Array.isArray(tree.tree) || tree.tree.length > 64)
+    reject(502, "invalid_state_tree");
+  const item = (path) =>
+    tree.tree.find(
+      (e) => e.path === path && e.type === "blob" && e.mode === "100644",
+    );
+  const receipt = item("gateway-receipt.json");
+  if (
+    item("public-stats.json")?.sha !== pub.sha ||
+    item("private-metrics.json")?.sha !== priv.sha ||
+    !receipt ||
+    !hex(receipt.sha) ||
+    !Number.isSafeInteger(receipt.size) ||
+    receipt.size > MAX_RECEIPT_BYTES * 1.4
+  )
+    reject(409, "publication_not_confirmed");
+  const bytes = await api(
+    `/git/blobs/${receipt.sha}`,
+    "GET",
+    undefined,
+    false,
+    MAX_RECEIPT_BYTES * 1.4,
+  );
+  await verifyGitBlob(bytes, receipt);
+  const verified = await verify(
+    new TextDecoder("utf-8", { fatal: true }).decode(bytes),
+    "baseline",
+    env,
+    policy,
+  );
+  const proof = verified.publication;
+  if (
+    !proof ||
+    proof.batch !== pub.batch ||
+    proof.pair !== pub.pair ||
+    proof.base !== pub.base ||
+    proof.publicSha !== pub.sha ||
+    proof.privateSha !== priv.sha
+  )
+    reject(409, "publication_not_confirmed");
+  if ((await current(api)) !== head) reject(409, "snapshot_superseded");
+  return dispatchSelection(pub, head, priv.sha, env);
+}
+export async function publish(request, env, fetcher, policy) {
   const url = new URL(request.url);
   if (
     request.method !== "POST" ||
     url.search ||
-    !/^\/publish\/(start|chunk|seal|upload|commit|dispatch)$/.test(url.pathname)
+    !/^\/publish\/(start|recover|baseline|chunk|seal|upload|commit|status|dispatch)$/.test(
+      url.pathname,
+    )
   )
     reject();
   const action = url.pathname.slice("/publish/".length),
@@ -165,7 +263,8 @@ export async function publish(
     const bytes = await boundedBytes(request, MAX_UPLOAD_BYTES);
     if (
       bytes.length !== sealed.length ||
-      bytesHex(await crypto.subtle.digest("SHA-256", bytes)) !== sealed.hash
+      bytesHex(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes))) !==
+        sealed.hash
     )
       reject();
     const blob = await api("/git/blobs", "POST", bytes);
@@ -176,10 +275,15 @@ export async function publish(
     });
   }
   const body = await jsonBody(request, 256 * 1024);
-  if (action === "start") {
-    exact(body, []);
+  if (action === "start" || action === "recover") {
+    const recovering = action === "recover";
+    exact(body, recovering ? ["expectedCurrentCommit"] : []);
+    if (recovering && !hex(body.expectedCurrentCommit))
+      reject(400, "invalid_current_commit_confirmation");
     const base = await current(api),
       commit = base ? await api(`/git/commits/${base}`) : null;
+    if (recovering && base !== body.expectedCurrentCommit)
+      reject(409, "durable_state_changed_restart_recovery");
     if (commit && !hex(commit.tree?.sha)) reject(502, "invalid_state_tree");
     const tree = commit
       ? await api(`/git/trees/${commit.tree.sha}`)
@@ -191,63 +295,158 @@ export async function publish(
         entry.path,
       ),
     );
+    if (
+      !base ||
+      baselines.length !== 2 ||
+      !baselines.some((e) => e.path === "private-metrics.json") ||
+      !baselines.some((e) => e.path === "rebuilt-private-metrics.json")
+    )
+      reject(409, "both_durable_baselines_required");
     for (const entry of baselines)
       if (
         entry.type !== "blob" ||
         entry.mode !== "100644" ||
         !hex(entry.sha) ||
         !Number.isSafeInteger(entry.size) ||
+        entry.size < 0 ||
         entry.size > MAX_UPLOAD_BYTES
       )
         reject(413, "legacy_baseline_exceeds_gateway_limit");
-    // No large legacy JSON is parsed inside the Free Worker. Trust only a
-    // full-validator-checked build-time bootstrap, or our own signed compact
-    // summary, in both cases bound to EVERY current baseline Git blob SHA.
+    // Existing signed receipts avoid re-parsing old histories. First migration
+    // reads one fixed, exact Git blob per baseline request; no client data/URL.
     const entry = tree.tree.find((e) => e.path === "gateway-receipt.json");
-    let trusted;
+    let previous = [],
+      prior = [],
+      pending = baselines.map(({ path, sha, size }) => ({ path, sha, size }));
     if (entry) {
       if (
         entry.type !== "blob" ||
         entry.mode !== "100644" ||
         !hex(entry.sha) ||
+        !Number.isSafeInteger(entry.size) ||
         entry.size > MAX_RECEIPT_BYTES * 1.4
       )
         reject(403, "invalid_baseline_receipt");
-      const blob = await api(`/git/blobs/${entry.sha}`);
-      if (
-        blob?.encoding !== "base64" ||
-        blob.sha !== entry.sha ||
-        typeof blob.content !== "string"
-      )
-        reject(502, "invalid_baseline_receipt");
-      trusted = await verify(
-        Buffer.from(blob.content, "base64").toString("utf8"),
-        "baseline",
-        env,
-        policy,
+      const bytes = await api(
+        `/git/blobs/${entry.sha}`,
+        "GET",
+        undefined,
+        false,
+        MAX_RECEIPT_BYTES * 1.4,
       );
-    } else trusted = bootstrapData;
-    if (
-      !trusted ||
-      trusted.policy !== policy.configSha256 ||
-      trusted.baselines.length !== baselines.length ||
-      baselines.some(
-        (e) =>
-          !trusted.baselines.some((b) => b.path === e.path && b.sha === e.sha),
+      await verifyGitBlob(bytes, entry);
+      let trusted;
+      try {
+        trusted = await verify(
+          new TextDecoder("utf-8", { fatal: true }).decode(bytes),
+          "baseline",
+          env,
+          policy,
+          recovering,
+        );
+      } catch (error) {
+        if (
+          !recovering ||
+          !(error instanceof GatewayError) ||
+          error.status !== 403
+        )
+          throw error;
+        // Explicit key-rotation recovery: current server snapshots become the
+        // revalidated trust root. No claim of continuity with an unverifiable old key.
+      }
+      if (
+        trusted &&
+        !recovering &&
+        (!Array.isArray(trusted.baselines) ||
+          trusted.baselines.length !== baselines.length ||
+          baselines.some(
+            (e) =>
+              !trusted.baselines.some(
+                (b) => b.path === e.path && b.sha === e.sha,
+              ),
+          ))
       )
-    )
-      reject(409, "baseline_bootstrap_outdated_rebuild_required");
-    const prior = baselines.length ? trusted.baselines : [];
+        reject(409, "durable_baseline_changed_recovery_required");
+      if (recovering) previous = trusted?.baselines ?? [];
+      else {
+        prior = trusted.baselines;
+        pending = [];
+      }
+    }
     const state = {
       ...receiptBase(policy),
       base,
       tree: commit?.tree.sha ?? null,
       baselines: prior,
+      previousBaselines: previous,
+      pendingBaselines: pending,
       validation: newValidation(),
     };
-    return response({ receipt: await sign(state, env), baselineCount: 0 });
+    return response({
+      receipt: await sign(state, env),
+      baselineCount: pending.length,
+    });
   }
-  if (action === "commit") {
+  if (action === "baseline") {
+    exact(body, ["receipt"]);
+    const state = await verify(body.receipt, "progress", env, policy);
+    if (!state.pendingBaselines?.length || state.validation.public)
+      reject(409, "baseline_phase_required");
+    await assertCurrent(api, state);
+    const entry = state.pendingBaselines[0];
+    const bytes = await api(
+      `/git/blobs/${entry.sha}`,
+      "GET",
+      undefined,
+      false,
+      MAX_UPLOAD_BYTES,
+    );
+    await verifyGitBlob(bytes, entry);
+    let data;
+    try {
+      data = JSON.parse(
+        new TextDecoder("utf-8", { fatal: true }).decode(bytes),
+      );
+      if (entry.path === "private-metrics.json")
+        validateCompletePrivateMetrics(data);
+      else if (entry.path === "rebuilt-private-metrics.json")
+        validateRebuiltPrivateMetrics(data);
+      else reject();
+      if (data.repositories.length > 64)
+        reject(413, "snapshot_scope_exceeds_gateway_limit");
+    } catch (error) {
+      if (error instanceof GatewayError) throw error;
+      reject(400, "legacy_baseline_schema_rejected");
+    }
+    state.baselines.push({
+      path: entry.path,
+      sha: entry.sha,
+      data: compact(data),
+    });
+    state.pendingBaselines.shift();
+    if (!state.pendingBaselines.length && state.previousBaselines?.length) {
+      try {
+        for (const old of state.previousBaselines) {
+          const next = state.baselines.find((b) => b.path === old.path);
+          if (!next) reject(409, "recovery_cannot_remove_known_baseline");
+          validatePrivateMetricsReplacement(old.data, next.data, undefined, {
+            resetEpoch: policy.datasetEpoch,
+            preserveScope: true,
+            allowRebuilt: old.path === "rebuilt-private-metrics.json",
+          });
+        }
+      } catch (error) {
+        if (error instanceof GatewayError) throw error;
+        reject(409, "recovery_cannot_roll_back_known_baseline");
+      }
+      state.previousBaselines = [];
+    }
+    return response({
+      receipt: await sign(state, env),
+      baselineCount: state.pendingBaselines.length,
+    });
+  }
+  if (action === "commit" || action === "status") {
     exact(body, ["public", "private", "selection"]);
     const selection = await verify(body.selection, "selection", env, policy);
     const pub = await verify(body.public, "blob", env, policy),
@@ -263,6 +462,8 @@ export async function publish(
       selection.pair !== pub.pair
     )
       reject();
+    if (action === "status")
+      return recoverCommitted(api, pub, priv, env, policy);
     await assertCurrent(api, pub);
     const baselines = [
       { path: "private-metrics.json", sha: priv.sha, data: selection.private },
@@ -271,7 +472,18 @@ export async function publish(
       ),
     ];
     const receipt = await sign(
-      { purpose: "baseline", policy: pub.policy, baselines },
+      {
+        purpose: "baseline",
+        policy: pub.policy,
+        baselines,
+        publication: {
+          batch: pub.batch,
+          pair: pub.pair,
+          base: pub.base,
+          publicSha: pub.sha,
+          privateSha: priv.sha,
+        },
+      },
       env,
     );
     const receiptBlob = await api("/git/blobs", "POST", {
@@ -321,20 +533,9 @@ export async function publish(
         ref: "refs/heads/tally-state",
         sha: commit.sha,
       });
-    const selected = {
-      ...pub,
-      purpose: "dispatch",
-      commit: commit.sha,
-      publicSha: pub.sha,
-      privateSha: priv.sha,
-    };
-    return response({
-      receipt: await sign(selected, env),
-      snapshotCommit: commit.sha,
-      publicBlobSha: pub.sha,
-      privateBlobSha: priv.sha,
-    });
+    return dispatchSelection(pub, commit.sha, priv.sha, env);
   }
+
   if (action === "dispatch") {
     exact(body, ["receipt"]);
     const selected = await verify(body.receipt, "dispatch", env, policy);
@@ -352,6 +553,8 @@ export async function publish(
   }
   exact(body, action === "chunk" ? ["receipt", "chunk"] : ["receipt"]);
   const state = await verify(body.receipt, "progress", env, policy);
+  if (state.pendingBaselines?.length)
+    reject(409, "baseline_validation_required");
   if (action === "chunk") {
     try {
       state.validation = validateChunk(state.validation, body.chunk, policy);
@@ -371,9 +574,11 @@ export async function publish(
     reject(400, "snapshot_schema_or_replacement_rejected");
   }
   const pair = bytesHex(
-    await crypto.subtle.digest(
-      "SHA-256",
-      encoder.encode(JSON.stringify(sealed)),
+    new Uint8Array(
+      await crypto.subtle.digest(
+        "SHA-256",
+        encoder.encode(JSON.stringify(sealed)),
+      ),
     ),
   );
   const result = {};

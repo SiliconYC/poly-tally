@@ -20,14 +20,18 @@ export async function boundedBytes(request, limit) {
   if (
     request.headers.get("Content-Encoding") &&
     request.headers.get("Content-Encoding") !== "identity"
-  )
+  ) {
+    await request.body?.cancel();
     reject(400, "encoded_body_not_allowed");
+  }
   const declared = request.headers.get("Content-Length");
   if (
     declared !== null &&
     (!/^\d+$/.test(declared) || Number(declared) > limit)
-  )
+  ) {
+    await request.body?.cancel();
     reject(413, "body_too_large");
+  }
   const reader = request.body?.getReader();
   if (!reader) return new Uint8Array();
   const chunks = [];
@@ -71,7 +75,10 @@ export function allowedRepository(name, env) {
     return false;
   let list;
   try {
-    list = JSON.parse(env.ALLOWED_REPOSITORIES);
+    list =
+      env.ALLOWED_REPOSITORIES === undefined
+        ? ["SiliconYC/*"]
+        : JSON.parse(env.ALLOWED_REPOSITORIES);
   } catch {
     return false;
   }
@@ -162,7 +169,7 @@ export function routeRead(url, method, env) {
         branch.length > 255 ||
         /[\x00-\x20\x7f~^:?*\[\\]/.test(branch) ||
         branch.includes("%") ||
-          branch.includes("..") ||
+        branch.includes("..") ||
         branch.includes("@{") ||
         branch.endsWith(".") ||
         branch
@@ -225,7 +232,7 @@ function readHeaders(upstream) {
 export async function read(request, env, fetcher) {
   const url = new URL(request.url),
     route = routeRead(url, request.method, env);
-  if (!env.READ_PAT) reject(503, "gateway_not_configured");
+  if (!env.GITHUB_READ_TOKEN) reject(503, "gateway_not_configured");
   const headers = new Headers({
     "User-Agent": "poly-tally-gateway/1",
     "Accept-Encoding": "identity",
@@ -233,7 +240,7 @@ export async function read(request, env, fetcher) {
   if (route.kind === "git") {
     headers.set(
       "Authorization",
-      `Basic ${btoa(`x-access-token:${env.READ_PAT}`)}`,
+      `Basic ${btoa(`x-access-token:${env.GITHUB_READ_TOKEN}`)}`,
     );
     if (request.method === "POST") {
       if (
@@ -249,7 +256,7 @@ export async function read(request, env, fetcher) {
       headers.set("Git-Protocol", protocol);
     }
   } else {
-    headers.set("Authorization", `Bearer ${env.READ_PAT}`);
+    headers.set("Authorization", `Bearer ${env.GITHUB_READ_TOKEN}`);
     headers.set("Accept", "application/vnd.github+json");
     headers.set("X-GitHub-Api-Version", "2022-11-28");
   }
@@ -322,7 +329,13 @@ export async function read(request, env, fetcher) {
         .match(/^<([^>]+)>; rel="(next|last|first|prev)"$/);
       if (!match) reject(502, "invalid_upstream_link");
       const target = new URL(match[1]);
-      if (target.origin !== "https://api.github.com")
+      if (
+        target.origin !== "https://api.github.com" ||
+        target.username ||
+        target.password ||
+        target.hash ||
+        target.pathname !== new URL(route.url).pathname
+      )
         reject(502, "invalid_upstream_link");
       const rewritten = new URL(
         `/api${target.pathname}${target.search}`,

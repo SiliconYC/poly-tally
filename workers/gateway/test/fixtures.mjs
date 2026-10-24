@@ -22,7 +22,8 @@ const proof = (n) => ({
   missingMembers: 0,
   failed: 0,
 });
-export function fixtures() {
+export function fixtures(snapshotPolicy = policy) {
+  const policy = snapshotPolicy;
   const pub = {
     schemaVersion: 1,
     generatedAt,

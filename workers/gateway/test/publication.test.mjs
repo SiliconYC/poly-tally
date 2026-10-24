@@ -8,16 +8,36 @@ import {
   blobBody,
 } from "../../../scripts/gateway-protocol.mjs";
 const env = {
-  GATEWAY_PASSWORD: "fixture-proxy-password-not-a-real-secret-123456789",
-  READ_PAT: "fake-read-pat",
-  WRITE_PAT: "fake-write-pat",
-  GATEWAY_RECEIPT_KEY: "fake-receipt-key-not-real-12345678901234567890",
+  GATEWAY_KEY: "fixture-proxy-password-not-a-real-secret-123456789",
+  GITHUB_READ_TOKEN: "fake-read-pat",
+  GITHUB_PUBLISH_TOKEN: "fake-write-pat",
   ALLOWED_REPOSITORIES: '["SiliconYC/poly-tally"]',
 };
 function upstream(baselines = []) {
+  const { priv } = fixtures(),
+    rebuilt = structuredClone(priv);
+  rebuilt.completeness.complete = false;
+  rebuilt.completeness.discoveryComplete = false;
+  baselines = [
+    ...new Map(
+      [
+        { path: "private-metrics.json", data: priv },
+        { path: "rebuilt-private-metrics.json", data: rebuilt },
+        ...baselines,
+      ].map((b) => [b.path, b]),
+    ).values(),
+  ];
+  baselines = baselines.map((b) => ({
+    ...b,
+    sha: createHash("sha1")
+      .update(`blob ${Buffer.byteLength(JSON.stringify(b.data))}\0`)
+      .update(JSON.stringify(b.data))
+      .digest("hex"),
+  }));
   let ref = "1".repeat(40),
     tree = "2".repeat(40),
     counter = 3,
+    parents = [],
     entries = baselines.map((b) => ({
       path: b.path,
       sha: b.sha,
@@ -30,11 +50,10 @@ function upstream(baselines = []) {
   return {
     writes,
     blobs,
-    bootstrap: { policy: policy.configSha256, baselines },
     setStateEntry(entry) {
       entries = entries.filter((e) => e.path !== entry.path);
       if (entry.sha) {
-        const content = JSON.stringify(entry.data);
+        const content = entry.raw ?? JSON.stringify(entry.data);
         blobs.set(entry.sha, content);
         entries.push({
           path: entry.path,
@@ -50,7 +69,10 @@ function upstream(baselines = []) {
     },
     fetcher: async (url, o) => {
       assert.equal(o.redirect, "manual");
-      assert.equal(o.headers.get("Authorization"), "Bearer fake-write-pat");
+      assert.equal(
+        o.headers.get("Authorization"),
+        o.method === "GET" ? "Bearer fake-read-pat" : "Bearer fake-write-pat",
+      );
       assert.ok(
         url.startsWith("https://api.github.com/repos/SiliconYC/poly-tally/"),
       );
@@ -59,16 +81,16 @@ function upstream(baselines = []) {
         if (path === "/git/ref/heads/tally-state")
           return Response.json({ object: { sha: ref } });
         if (path.startsWith("/git/commits/"))
-          return Response.json({ tree: { sha: tree } });
+          return Response.json({
+            tree: { sha: tree },
+            parents: parents.map((sha) => ({ sha })),
+          });
         if (path.startsWith("/git/trees/"))
           return Response.json({ tree: entries, truncated: false });
         if (path.startsWith("/git/blobs/")) {
           const sha = path.split("/").at(-1);
-          return Response.json({
-            sha,
-            encoding: "base64",
-            content: Buffer.from(blobs.get(sha)).toString("base64"),
-          });
+          assert.match(o.headers.get("Accept"), /raw/);
+          return new Response(blobs.get(sha));
         }
         assert.fail(path);
       }
@@ -106,6 +128,7 @@ function upstream(baselines = []) {
       }
       if (path === "/git/commits") {
         assert.deepEqual(body.parents, [ref]);
+        parents = body.parents;
         return Response.json({ sha: "4".repeat(40) });
       }
       if (path === "/git/refs/heads/tally-state") {
@@ -126,26 +149,37 @@ function upstream(baselines = []) {
     },
   };
 }
-async function call(api, path, body, headers = {}) {
+async function call(api, path, body, headers = {}, config = env) {
   const r = await worker.fetch(
     new Request(`https://gateway.example/publish/${path}`, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${env.GATEWAY_PASSWORD}`,
+        Authorization: `Bearer ${env.GATEWAY_KEY}`,
         "Content-Type": "application/json",
         ...headers,
       },
       body: typeof body === "string" ? body : JSON.stringify(body),
     }),
-    env,
-    { fetcher: api.fetcher, policy, bootstrap: api.bootstrap },
+    config,
+    { fetcher: api.fetcher, policy },
   );
   return { status: r.status, body: await r.json() };
 }
 async function prepared(api, initial, change, expectedStatus = 200) {
   let r = initial
-    ? { status: 200, body: { receipt: initial } }
+    ? {
+        status: 200,
+        body: {
+          receipt: initial,
+          baselineCount: JSON.parse(
+            Buffer.from(initial.split(".")[0], "base64url"),
+          ).pendingBaselines.length,
+        },
+      }
     : await call(api, "start", {});
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  while (r.body.baselineCount)
+    r = await call(api, "baseline", { receipt: r.body.receipt });
   assert.equal(r.status, 200, JSON.stringify(r.body));
   let receipt = r.body.receipt;
   const f = fixtures();
@@ -213,7 +247,9 @@ test("unsupported routes, caller refs and incomplete batches fail closed", async
     const r = await call(api, path, { ref: "main" });
     assert.equal(r.status, 403);
   }
-  const first = await call(api, "start", {});
+  let first = await call(api, "start", {});
+  while (first.body.baselineCount)
+    first = await call(api, "baseline", { receipt: first.body.receipt });
   const sealed = await call(api, "seal", { receipt: first.body.receipt });
   assert.equal(sealed.status, 400);
   assert.equal(api.writes.length, 0);
@@ -245,7 +281,14 @@ function retime(token, expires) {
   return (
     payload +
     "." +
-    createHmac("sha256", env.GATEWAY_RECEIPT_KEY)
+    createHmac(
+      "sha256",
+      createHash("sha256")
+        .update(
+          `poly-tally/gateway/receipt-key/v2\0${env.GITHUB_PUBLISH_TOKEN}`,
+        )
+        .digest(),
+    )
       .update(Buffer.from(payload, "base64url"))
       .digest("base64url")
   );
@@ -330,31 +373,16 @@ test("same-batch forks cannot mix differently validated snapshot pairs", async (
     403,
   );
 });
-test("current legacy baseline requires exact reviewed bootstrap SHAs; drift and policy changes fail closed", async () => {
+test("server baseline step refuses a changed durable ref", async () => {
   const { priv } = fixtures(),
-    api = upstream([
-      { path: "private-metrics.json", sha: "a".repeat(40), data: priv },
-    ]);
-  assert.equal((await call(api, "start", {})).status, 200);
-  api.bootstrap.baselines[0] = {
-    ...api.bootstrap.baselines[0],
-    sha: "b".repeat(40),
-  };
-  assert.equal((await call(api, "start", {})).status, 409);
-  api.bootstrap = { policy: policy.configSha256, baselines: [] };
-  assert.equal((await call(api, "start", {})).status, 409);
-  api.bootstrap = {
-    policy: "old",
-    baselines: [
-      { path: "private-metrics.json", sha: "a".repeat(40), data: priv },
-    ],
-  };
-  assert.equal((await call(api, "start", {})).status, 409);
-});
-test("no configured bootstrap and no signed receipt cannot initialize publication", async () => {
-  const api = upstream();
-  api.bootstrap = undefined;
-  assert.equal((await call(api, "start", {})).status, 409);
+    api = upstream([{ path: "private-metrics.json", data: priv }]);
+  const first = await call(api, "start", {});
+  assert.equal(first.body.baselineCount, 2);
+  api.changeRef();
+  assert.equal(
+    (await call(api, "baseline", { receipt: first.body.receipt })).status,
+    409,
+  );
   assert.equal(api.writes.length, 0);
 });
 test("signed compact baseline survives restart, but tampering or rebuilt changes is rejected", async () => {
@@ -372,7 +400,6 @@ test("signed compact baseline survives restart, but tampering or rebuilt changes
     (await call(api, "commit", { ...uploaded, selection: s.selection })).status,
     200,
   );
-  api.bootstrap = null;
   assert.equal((await call(api, "start", {})).status, 200);
   const saved = api.writes.find(
     (x) =>
@@ -385,7 +412,7 @@ test("signed compact baseline survives restart, but tampering or rebuilt changes
     .update(saved)
     .digest("hex");
   api.blobs.set(sha, saved.slice(0, -1) + (saved.endsWith("x") ? "y" : "x"));
-  assert.equal((await call(api, "start", {})).status, 403);
+  assert.equal((await call(api, "start", {})).status, 502);
 });
 test("oversized body and unsupported upload encoding never reach GitHub", async () => {
   const api = upstream(),
@@ -460,7 +487,11 @@ test("reviewed private and rebuilt scope/time baselines cannot be rolled back", 
     priv.collection.repositories = 2;
     priv.completeness.expectedRepositories =
       priv.completeness.scannedRepositories = 3;
-    const api = upstream([{ path, sha: "a".repeat(40), data: priv }]);
+    if (path === "rebuilt-private-metrics.json") {
+      priv.completeness.complete = false;
+      priv.completeness.discoveryComplete = false;
+    }
+    const api = upstream([{ path, data: priv }]);
     await prepared(api, undefined, undefined, 400);
     assert.equal(api.writes.length, 0);
   }
@@ -471,4 +502,190 @@ test("reviewed private and rebuilt scope/time baselines cannot be rolled back", 
   ]);
   await prepared(api, undefined, undefined, 400);
   assert.equal(api.writes.length, 0);
+});
+
+test("lost final PATCH response can recover exact commit selectors without any additional write", async () => {
+  const api = upstream(),
+    s = await prepared(api),
+    uploaded = {};
+  for (const [kind, data] of [
+    ["public", s.pub],
+    ["private", s.priv],
+  ])
+    uploaded[kind] = (
+      await call(api, "upload", blobBody(data), { "X-Poly-Receipt": s[kind] })
+    ).body.receipt;
+  const payload = { ...uploaded, selection: s.selection },
+    old = api.fetcher;
+  api.fetcher = async (url, options) => {
+    const result = await old(url, options);
+    if (options.method === "PATCH")
+      throw new Error("fake lost response AFTER confirmed update");
+    return result;
+  };
+  assert.equal((await call(api, "commit", payload)).status, 502);
+  const count = api.writes.length;
+  const recovered = await call(api, "status", payload);
+  assert.equal(recovered.status, 200, JSON.stringify(recovered.body));
+  assert.match(recovered.body.snapshotCommit, /^[a-f0-9]{40}$/);
+  assert.equal(api.writes.length, count);
+  assert.equal(
+    (await call(api, "dispatch", { receipt: recovered.body.receipt })).status,
+    200,
+  );
+});
+test("explicit receipt-key rotation recovery requires both fixed baselines and current-commit confirmation", async () => {
+  const { priv } = fixtures(),
+    rebuilt = structuredClone(priv);
+  rebuilt.completeness.complete = false;
+  rebuilt.completeness.discoveryComplete = false;
+  const api = upstream([
+    { path: "private-metrics.json", data: priv },
+    { path: "rebuilt-private-metrics.json", data: rebuilt },
+  ]);
+  const stale = await call(api, "recover", {
+    expectedCurrentCommit: "0".repeat(40),
+  });
+  assert.equal(stale.status, 409);
+  const start = await call(api, "recover", {
+    expectedCurrentCommit: "1".repeat(40),
+  });
+  assert.equal(start.status, 200);
+  assert.equal(start.body.baselineCount, 2);
+  let next = start;
+  while (next.body.baselineCount)
+    next = await call(api, "baseline", { receipt: next.body.receipt });
+  assert.equal(next.status, 200);
+  api.setStateEntry({ path: "rebuilt-private-metrics.json" });
+  assert.equal(
+    (await call(api, "recover", { expectedCurrentCommit: "1".repeat(40) }))
+      .status,
+    409,
+  );
+  assert.equal(api.writes.length, 0);
+});
+
+test("actual publish-token rotation fails ordinary start and explicit server recovery revalidates both blobs", async () => {
+  const api = upstream(),
+    s = await prepared(api),
+    uploaded = {};
+  for (const [kind, data] of [
+    ["public", s.pub],
+    ["private", s.priv],
+  ])
+    uploaded[kind] = (
+      await call(api, "upload", blobBody(data), { "X-Poly-Receipt": s[kind] })
+    ).body.receipt;
+  const saved = await call(api, "commit", {
+    ...uploaded,
+    selection: s.selection,
+  });
+  assert.equal(saved.status, 200);
+  const rotated = { ...env, GITHUB_PUBLISH_TOKEN: "fake-rotated-write-token" },
+    before = api.writes.length;
+  assert.equal((await call(api, "start", {}, {}, rotated)).status, 403);
+  let result = await call(
+    api,
+    "recover",
+    { expectedCurrentCommit: saved.body.snapshotCommit },
+    {},
+    rotated,
+  );
+  assert.equal(result.status, 200);
+  while (result.body.baselineCount)
+    result = await call(
+      api,
+      "baseline",
+      { receipt: result.body.receipt },
+      {},
+      rotated,
+    );
+  assert.equal(result.status, 200);
+  assert.equal(api.writes.length, before);
+});
+test("recovery cannot use a still-verifiable old receipt to permit scope rollback", async () => {
+  const api = upstream(),
+    s = await prepared(api),
+    uploaded = {};
+  for (const [kind, data] of [
+    ["public", s.pub],
+    ["private", s.priv],
+  ])
+    uploaded[kind] = (
+      await call(api, "upload", blobBody(data), { "X-Poly-Receipt": s[kind] })
+    ).body.receipt;
+  const saved = await call(api, "commit", {
+    ...uploaded,
+    selection: s.selection,
+  });
+  assert.equal(saved.status, 200);
+  const reduced = structuredClone(s.priv);
+  reduced.repositories = [];
+  reduced.collection.repositories = 0;
+  const bytes = JSON.stringify(reduced),
+    sha = createHash("sha1")
+      .update(`blob ${Buffer.byteLength(bytes)}\0`)
+      .update(bytes)
+      .digest("hex");
+  api.setStateEntry({ path: "private-metrics.json", sha, data: reduced });
+  assert.equal((await call(api, "start", {})).status, 409);
+  let result = await call(api, "recover", {
+    expectedCurrentCommit: saved.body.snapshotCommit,
+  });
+  assert.equal(result.status, 200);
+  while (result.body.baselineCount && result.status === 200)
+    result = await call(api, "baseline", { receipt: result.body.receipt });
+  assert.equal(result.status, 409);
+});
+
+test("cryptographically valid prior-policy receipt remains a scope constraint during explicit recovery", async () => {
+  const api = upstream(),
+    s = await prepared(api),
+    uploaded = {};
+  for (const [kind, data] of [
+    ["public", s.pub],
+    ["private", s.priv],
+  ])
+    uploaded[kind] = (
+      await call(api, "upload", blobBody(data), { "X-Poly-Receipt": s[kind] })
+    ).body.receipt;
+  const saved = await call(api, "commit", {
+    ...uploaded,
+    selection: s.selection,
+  });
+  assert.equal(saved.status, 200);
+  const token = api.writes.find(
+    (x) => x.path === "/git/blobs" && !x.body.content.startsWith("{"),
+  ).body.content;
+  const value = JSON.parse(Buffer.from(token.split(".")[0], "base64url"));
+  value.policy = "d".repeat(64);
+  const payload = Buffer.from(JSON.stringify(value)),
+    key = createHash("sha256")
+      .update(`poly-tally/gateway/receipt-key/v2\0${env.GITHUB_PUBLISH_TOKEN}`)
+      .digest();
+  const raw =
+    payload.toString("base64url") +
+    "." +
+    createHmac("sha256", key).update(payload).digest("base64url");
+  const receiptSha = createHash("sha1")
+    .update(`blob ${Buffer.byteLength(raw)}\0`)
+    .update(raw)
+    .digest("hex");
+  api.setStateEntry({ path: "gateway-receipt.json", sha: receiptSha, raw });
+  const reduced = structuredClone(s.priv);
+  reduced.repositories = [];
+  reduced.collection.repositories = 0;
+  const bytes = JSON.stringify(reduced),
+    sha = createHash("sha1")
+      .update(`blob ${Buffer.byteLength(bytes)}\0`)
+      .update(bytes)
+      .digest("hex");
+  api.setStateEntry({ path: "private-metrics.json", sha, data: reduced });
+  let result = await call(api, "recover", {
+    expectedCurrentCommit: saved.body.snapshotCommit,
+  });
+  assert.equal(result.status, 200);
+  while (result.body.baselineCount && result.status === 200)
+    result = await call(api, "baseline", { receipt: result.body.receipt });
+  assert.equal(result.status, 409);
 });

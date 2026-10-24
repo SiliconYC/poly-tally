@@ -1,4 +1,5 @@
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, open } from "node:fs/promises";
+import { constants } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import {
@@ -13,6 +14,48 @@ import {
   snapshotChunks,
 } from "./gateway-protocol.mjs";
 
+// Linux gateway capability files must never fall back to symlink/hardlink targets.
+async function withReceiptFile(filename, writing, callback) {
+  let handle;
+  try {
+    handle = await open(
+      filename,
+      (writing ? constants.O_WRONLY | constants.O_CREAT : constants.O_RDONLY) |
+        constants.O_NOFOLLOW |
+        constants.O_NONBLOCK,
+      0o600,
+    );
+    const info = await handle.stat();
+    if (
+      !info.isFile() ||
+      info.nlink !== 1 ||
+      typeof process.getuid !== "function" ||
+      info.uid !== process.getuid()
+    )
+      throw new Error("unsafe");
+    await handle.chmod(0o600);
+    return await callback(handle);
+  } catch {
+    throw new GatewayClientError(
+      "Gateway receipt file is unsafe or unavailable",
+    );
+  } finally {
+    await handle?.close();
+  }
+}
+async function writeReceipt(filename, value) {
+  return withReceiptFile(filename, true, async (handle) => {
+    await handle.truncate(0);
+    await handle.writeFile(JSON.stringify(value));
+    await handle.sync();
+  });
+}
+async function readReceipt(filename) {
+  return withReceiptFile(filename, false, async (handle) =>
+    JSON.parse(await handle.readFile("utf8")),
+  );
+}
+
 export async function publishGateway({
   publicData,
   privateData,
@@ -20,6 +63,8 @@ export async function publishGateway({
   env = process.env,
   fetcher = fetch,
   onCommitted,
+  onPendingCommit,
+  recoveryCommit,
 } = {}) {
   try {
     validateSnapshotPair(publicData, privateData, policy);
@@ -36,7 +81,9 @@ export async function publishGateway({
         "Sanitized snapshot exceeds the 1 MiB gateway upload ceiling; publication stopped, no large-body fallback",
       );
   const api = gatewayClient({ env, fetcher });
-  let result = await api("start", {}),
+  let result = recoveryCommit
+      ? await api("recover", { expectedCurrentCommit: recoveryCommit })
+      : await api("start", {}),
     receipt = result.receipt;
   while (result.baselineCount) {
     result = await api("baseline", { receipt });
@@ -54,10 +101,9 @@ export async function publishGateway({
     uploaded = {};
   for (const kind of ["public", "private"])
     uploaded[kind] = (await api("upload", bodies[kind], sealed[kind])).receipt;
-  const committed = await api("commit", {
-    ...uploaded,
-    selection: sealed.selection,
-  });
+  const pending = { ...uploaded, selection: sealed.selection };
+  if (onPendingCommit) await onPendingCommit(pending);
+  const committed = await api("commit", pending);
   if (onCommitted) await onCommitted(committed);
   // If dispatch fails, preserve the saved immutable selectors for authorized retry;
   // never restart collection just to dispatch the exact same snapshot again.
@@ -81,6 +127,7 @@ export async function publishGatewayFiles({
   publicFilename,
   privateFilename,
   root,
+  recoveryCommit,
   env = process.env,
   fetcher = fetch,
   receiptFilename = resolve(
@@ -98,10 +145,12 @@ export async function publishGatewayFiles({
     policy,
     env,
     fetcher,
+    recoveryCommit,
+    onPendingCommit: async (pending) => {
+      await writeReceipt(receiptFilename, { pending });
+    },
     onCommitted: async (committed) => {
-      await writeFile(receiptFilename, JSON.stringify(committed), {
-        mode: 0o600,
-      });
+      await writeReceipt(receiptFilename, committed);
     },
   });
 }
@@ -109,10 +158,13 @@ export async function retryGatewayDispatch(
   filename,
   { env = process.env, fetcher = fetch } = {},
 ) {
-  const saved = JSON.parse(await readFile(filename, "utf8"));
-  return gatewayClient({ env, fetcher })("dispatch", {
-    receipt: saved.receipt,
-  });
+  let saved = await readReceipt(filename);
+  const api = gatewayClient({ env, fetcher });
+  if (saved.pending) {
+    saved = await api("status", saved.pending); // READ-ONLY confirmation; never repeat an uncertain commit.
+    await writeReceipt(filename, saved);
+  }
+  return api("dispatch", { receipt: saved.receipt });
 }
 if (
   process.argv[1] &&
@@ -122,6 +174,20 @@ if (
     const [publicFilename, privateFilename, ...extra] = process.argv.slice(2);
     if (publicFilename === "retry" && privateFilename && !extra.length) {
       console.log(JSON.stringify(await retryGatewayDispatch(privateFilename)));
+    } else if (
+      publicFilename === "recover" &&
+      /^[a-f0-9]{40}$/.test(privateFilename || "") &&
+      extra.length === 2
+    ) {
+      console.log(
+        JSON.stringify(
+          await publishGatewayFiles({
+            recoveryCommit: privateFilename,
+            publicFilename: extra[0],
+            privateFilename: extra[1],
+          }),
+        ),
+      );
     } else {
       if (!publicFilename || !privateFilename || extra.length)
         throw new GatewayClientError(
