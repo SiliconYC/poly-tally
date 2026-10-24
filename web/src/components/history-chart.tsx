@@ -1,4 +1,6 @@
 import { memo, useMemo, useRef, useState } from "react";
+import { timeAxisTicks, timeTickLabel } from "@/lib/chart-x-axis";
+import { usePlotWidth } from "@/lib/use-plot-width";
 import type { KeyboardEvent } from "react";
 import { Area, AreaChart, Brush, CartesianGrid, XAxis, YAxis } from "recharts";
 import { ChevronLeft, ChevronRight, RotateCcw } from "lucide-react";
@@ -59,6 +61,8 @@ const HistoryPlot = memo(function HistoryPlot({
   percent,
   maximum,
   axisTicks,
+  timeTicks,
+  timeUnit,
 }: {
   rows: ChartRow[];
   series: HistoryResult["series"];
@@ -69,6 +73,8 @@ const HistoryPlot = memo(function HistoryPlot({
   percent: boolean;
   maximum: number;
   axisTicks: number[];
+  timeTicks: number[];
+  timeUnit: ReturnType<typeof timeAxisTicks>["unit"];
 }) {
   return (
     <ChartContainer
@@ -85,10 +91,17 @@ const HistoryPlot = memo(function HistoryPlot({
           dataKey="time"
           type="number"
           domain={[start, end === start ? end + 1 : end]}
+          allowDataOverflow
           scale="time"
-          minTickGap={50}
-          tickFormatter={(time) => day(Number(time)).slice(5)}
-          tickLine={false}
+          ticks={timeTicks}
+          interval={0}
+          tickFormatter={(time) =>
+            timeTickLabel(Number(time), timeUnit, new Date(start).getUTCFullYear() !== new Date(end).getUTCFullYear())
+          }
+          tick={{ fontSize: 11, fontWeight: 500 }}
+          tickLine={{ stroke: "var(--border)", strokeWidth: 1 }}
+          tickSize={4}
+          tickMargin={10}
           axisLine={false}
         />
         <YAxis
@@ -151,7 +164,7 @@ const HistoryNavigator = memo(function HistoryNavigator({
           travellerWidth={8}
           stroke="var(--muted-foreground)"
           fill="var(--background)"
-          tickFormatter={(value) => day(Number(value))}
+          tickFormatter={(value) => day(Number(value)).slice(5)}
           startIndex={Math.max(
             0,
             overview.reduce(
@@ -208,6 +221,7 @@ export function HistoryChart({
   const [pinned, setPinned] = useState(false);
   const [hoveredColumn, setHoveredColumn] = useState<number | null>(null);
   const plot = useRef<HTMLDivElement>(null);
+  const chartWidth = usePlotWidth(plot);
   const [anchor, setAnchor] = useState<{ x: number; y: number } | null>(null);
   const ordered = useMemo(
     () =>
@@ -238,6 +252,10 @@ export function HistoryChart({
     : 0;
   const start = range ? Math.max(min, Math.min(max, range[0])) : min;
   const end = range ? Math.max(start, Math.min(max, range[1])) : max;
+  const timeAxis = useMemo(
+    () => timeAxisTicks(start, end, Math.max(100, chartWidth - 88)),
+    [start, end, chartWidth],
+  );
   const result = useMemo(
     () =>
       range && full.points.length
@@ -521,6 +539,8 @@ export function HistoryChart({
                   percent={percent}
                   maximum={maximum}
                   axisTicks={stockAxis.ticks}
+                  timeTicks={timeAxis.ticks}
+                  timeUnit={timeAxis.unit}
                 />
                 {selectedAt !== null && (
                   <>
