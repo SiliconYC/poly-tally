@@ -1,4 +1,6 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
+import { categoryTickKeys, categoryTickLabel } from "@/lib/chart-x-axis";
+import { usePlotWidth } from "@/lib/use-plot-width";
 import {
   Bar,
   BarChart,
@@ -38,6 +40,8 @@ const changeLabel = (period: ChangePeriod) =>
 export function ChangesChart({ repositories, language, since, until }: Props) {
   const [metric, setMetric] = useState<Metric>("code");
   const [period, setPeriod] = useState<"day" | "week" | "month">("month");
+  const chartHost = useRef<HTMLDivElement>(null);
+  const chartWidth = usePlotWidth(chartHost);
   const periods = useMemo(
     () =>
       periodChanges(repositories, {
@@ -55,6 +59,14 @@ export function ChangesChart({ repositories, language, since, until }: Props) {
     () => niceAxis(periods.map((item) => item.change)),
     [periods],
   );
+  const categoryAxis = useMemo(() => {
+    const keys = periods.map((item) => item.key);
+    const crossYear = Boolean(keys.length && keys[0].slice(0, 4) !== keys[keys.length - 1].slice(0, 4));
+    return {
+      crossYear,
+      ticks: categoryTickKeys(keys, Math.max(80, chartWidth - 84), period === "month" || crossYear ? 82 : 72),
+    };
+  }, [periods, period, chartWidth]);
   const config = useMemo(
     () => ({ change: { label: METRIC_LABELS[metric], color: "#0d9488" } }),
     [metric],
@@ -103,6 +115,7 @@ export function ChangesChart({ repositories, language, since, until }: Props) {
       </CardHeader>
       <CardContent className="p-5">
         {periods.length ? (
+          <div ref={chartHost} className="min-w-0 w-full">
           <ChartContainer
             config={config}
             className="h-[280px] w-full aspect-auto"
@@ -116,11 +129,14 @@ export function ChangesChart({ repositories, language, since, until }: Props) {
               <XAxis
                 dataKey="key"
                 axisLine={false}
-                tickLine={false}
-                minTickGap={36}
+                tickLine={{ stroke: "var(--border)", strokeWidth: 1 }}
+                tickSize={4}
+                interval={0}
+                ticks={categoryAxis.ticks}
+                tick={{ fontSize: 11, fontWeight: 500 }}
                 tickMargin={10}
                 tickFormatter={(value) =>
-                  period === "month" ? String(value) : String(value).slice(5)
+                  categoryTickLabel(String(value), period === "month", categoryAxis.crossYear)
                 }
               />
               <YAxis
@@ -191,6 +207,7 @@ export function ChangesChart({ repositories, language, since, until }: Props) {
               </Bar>
             </BarChart>
           </ChartContainer>
+          </div>
         ) : (
           <div className="flex min-h-64 items-center justify-center text-sm text-muted-foreground">
             暂无历史数据
