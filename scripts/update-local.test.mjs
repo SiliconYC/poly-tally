@@ -34,3 +34,11 @@ test('publication selects the actual durable sanitized blob and reuses a stable 
   assert.deepEqual(JSON.parse(dispatched.options.body), {ref: 'dev', inputs: {external_private_blob_sha: sha}});
   assert.equal(result.privateBlobSha, sha);
 });
+
+test('explicit gateway mode never consults a GitHub credential and publishes only snapshot exports',async t=>{
+ const root=await mkdtemp(join(tmpdir(),'tally-gateway-update-'));t.after(()=>rm(root,{recursive:true,force:true}));await writeFile(join(root,'config.json'),JSON.stringify({datasetEpoch:'new-epoch'}));let invocation,published;
+ const env={POLY_TALLY_GATEWAY_URL:'https://gateway.example',POLY_TALLY_GATEWAY_PASSWORD:'fixture-proxy-password-not-a-real-secret-123456789'};
+ const result=await updateLocal({root,env,gateway:true,collect:(python,args,options)=>{invocation={python,args,options};return {status:0};},publish:async options=>{published=options;return {privateBlobSha:'a'.repeat(40)};},persist:()=>assert.fail('legacy persistence')});
+ assert.ok(invocation.args.includes('poly_tally.native_session'));assert.ok(invocation.args.includes('--gateway'));assert.equal(invocation.args[invocation.args.indexOf('--state')+1],join(root,'.poly-tally/local/epochs/new-epoch'));assert.equal(invocation.args[invocation.args.indexOf('--cache')+1],join(root,'.poly-tally/local/cache/private'));assert.equal(invocation.options.env.GH_TOKEN,undefined);assert.equal(invocation.options.env.POLY_TALLY_TOKEN,undefined);assert.match(published.publicFilename,/public-stats.json$/);assert.match(published.privateFilename,/private-metrics.json$/);assert.equal(result.privateBlobSha,'a'.repeat(40));
+ await assert.rejects(updateLocal({root,env:{},gateway:true,collect:()=>assert.fail()}),/gateway/i);
+});

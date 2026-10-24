@@ -2,6 +2,8 @@
 import os
 import subprocess
 
+from poly_tally.gateway import gateway_config
+
 
 # ◕ 功能
 class 凭证_类:
@@ -14,6 +16,8 @@ class 凭证_类:
 
     @staticmethod
     def api_读取(arg_使用Git凭证: bool) -> str | None:
+        if gateway_config() is not None:
+            return None
         if "POLY_TALLY_TOKEN" in os.environ and os.environ["POLY_TALLY_TOKEN"]:
             return os.environ["POLY_TALLY_TOKEN"]
         if not arg_使用Git凭证:

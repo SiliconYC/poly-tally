@@ -221,3 +221,13 @@ npm run preview -- --port 4187
 浏览器测试入口为 `npm run test:e2e`，性能测量入口为 `npm run bench`；运行前按对应测试配置准备浏览器和数据，实际结果以当次输出为准。真实数据测试仍在 `/tmp/` 临时工作目录进行，不提交实际统计。
 
 实现边界与数据协议见 [数据与模块](docs/architecture.md)。两个 Qt 参考项目的功能分析、React 迁移取舍和新版图表操作见 [仪表盘升级说明](docs/dashboard-upgrade.md)。
+
+### Cloudflare 免费密钥代理（代码准备，生产验收待完成）
+
+可选 `node scripts/update-local.mjs --gateway` 保持本地 Python / 原生 Git 统计，
+由固定 SiliconYC 只读代理及脱敏快照发布代理隔离 GitHub PAT。Dot 只使用独立代理口令；
+真实 Secrets 仅由所有者安全输入 Cloudflare。大 Git pack 流式传输，小快照有 1 MiB 硬上限，
+不会恢复已暂停定时任务。部署、最小权限、代理口令文件、缓存/CPU验收和限制见
+[操作说明](docs/operations/cloudflare-gateway.md)。
+真实 bootstrap 运行数据不进入源码：部署前显式生成至 gitignored 的
+`workers/gateway/.local/`，缺失即停止生产构建；所有单元和 workerd 测试只用合成数据。

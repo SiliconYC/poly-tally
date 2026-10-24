@@ -1,15 +1,29 @@
 import {execFileSync, spawnSync} from 'node:child_process';
-import {readFile} from 'node:fs/promises';
+import {readFile,mkdir,mkdtemp} from 'node:fs/promises';
 import {resolve} from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {runState} from './state.mjs';
+import {gatewayConfig,GatewayClientError} from './gateway-client.mjs';
+import {publishGatewayFiles} from './gateway-publish.mjs';
 
-export async function updateLocal({root = resolve(import.meta.dirname, '..'), env = process.env, collect = spawnSync, persist = runState, fetcher = fetch} = {}) {
+export async function updateLocal({root = resolve(import.meta.dirname, '..'), env = process.env, collect = spawnSync, persist = runState, fetcher = fetch, gateway = false, publish = publishGatewayFiles} = {}) {
   const repository = env.GITHUB_REPOSITORY || 'SiliconYC/poly-tally';
   if (!/^[\w.-]+\/[\w.-]+$/.test(repository)) throw new Error('Invalid GITHUB_REPOSITORY');
   const config = JSON.parse(await readFile(resolve(root, 'config.json'), 'utf8'));
   const epoch = env.POLY_TALLY_DATASET_EPOCH || config.datasetEpoch;
   if (typeof epoch !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/.test(epoch)) throw new Error('Invalid dataset epoch');
+  const gatewaySettings=gatewayConfig(env,gateway);
+  if(gatewaySettings){
+    if(epoch!==config.datasetEpoch)throw new GatewayClientError('Gateway dataset epoch must match the reviewed configuration');
+    if(repository!=='SiliconYC/poly-tally')throw new Error('Gateway publication repository is fixed');
+    const state=resolve(root,env.POLY_TALLY_LOCAL_STATE||'.poly-tally/local');
+    await mkdir(resolve(state,'batches'),{recursive:true,mode:0o700});
+    const batch=await mkdtemp(resolve(state,'batches/run-'));
+    const environment={...env,GITHUB_REPOSITORY:repository,POLY_TALLY_DATASET_EPOCH:epoch};
+    const result=collect(env.POLY_TALLY_PYTHON||resolve(root,'.venv/bin/python'),['-m','poly_tally.native_session','--gateway','--config',resolve(root,'config.json'),'--state',resolve(state,'epochs',epoch),'--cache',resolve(state,'cache/private'),'--report',resolve(state,'latest-report.json'),'--export-dir',batch],{cwd:root,env:environment,stdio:'inherit'});
+    if(result.error||result.status!==0)throw new Error('Local gateway collection failed; publication stopped');
+    return publish({root,env:environment,fetcher,publicFilename:resolve(batch,'public-stats.json'),privateFilename:resolve(batch,'private-metrics.json')});
+  }
   let token = env.GH_TOKEN || env.POLY_TALLY_TOKEN;
   if (!token) {
     const credential = execFileSync('git', ['-c', 'credential.interactive=false', 'credential', 'fill'], {
@@ -41,11 +55,12 @@ export async function updateLocal({root = resolve(import.meta.dirname, '..'), en
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   try {
-    if (process.argv.length > 2) throw new Error('Configure paths with POLY_TALLY_LOCAL_STATE and POLY_TALLY_PYTHON');
-    await updateLocal();
+    const args=process.argv.slice(2);
+    if(args.length>1||(args.length===1&&args[0]!=='--gateway'))throw new Error('Usage: update-local.mjs [--gateway]; configure paths with POLY_TALLY_LOCAL_STATE and POLY_TALLY_PYTHON');
+    await updateLocal({gateway:args.includes('--gateway')});
     console.log('Incremental collection saved; GitHub Pages publication dispatched.');
   } catch (error) {
-    console.error(error.code ? `Local update failed (${error.code})` : error.message);
+    console.error(error instanceof GatewayClientError?error.message:'Local update failed; publication stopped');
     process.exitCode = 1;
   }
 }

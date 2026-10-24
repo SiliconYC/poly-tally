@@ -10,6 +10,7 @@ import time
 
 from poly_tally.collector import 采集器_类
 from poly_tally.credentials import 凭证_类
+from poly_tally.gateway import gateway_config
 from poly_tally.export import 公开导出_类
 from poly_tally.lock import 运行锁_类
 from poly_tally.private_metrics import 私有规模导出_类
@@ -55,7 +56,7 @@ def 主入口() -> int:
             参数器.error("dataset epoch 必须是安全的批次名称")
         参数.state = 参数.state / "epochs" / 参数.dataset_epoch
     令牌 = None if 参数.command == "rebuild" else 凭证_类.api_读取(参数.git_credential)
-    if 参数.command == "collect" and not 参数.public_only and 令牌 is None:
+    if 参数.command == "collect" and not 参数.public_only and 令牌 is None and gateway_config() is None:
         raise ValueError("私有范围采集需要凭证：设置 POLY_TALLY_TOKEN 或显式使用 --git-credential；仅公开采集请指定 --public-only")
     if 参数.private_metrics_output and not 参数.include_private_metrics:
         参数器.error("--private-metrics-output 必须配合 --include-private-metrics，确认仅发布脱敏规模")

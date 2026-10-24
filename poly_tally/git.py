@@ -4,6 +4,8 @@ import os
 from pathlib import Path
 import subprocess
 
+from poly_tally.gateway import gateway_config, git_environment, git_url
+
 
 # ◕ 功能
 class Git对象_类:
@@ -18,12 +20,14 @@ class Git对象_类:
         self.路径 = arg_路径
         self.批进程: subprocess.Popen | None = None
         self.环境 = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
-        if "POLY_TALLY_TOKEN" in os.environ:
+        if gateway_config() is not None:
+            self.环境 = git_environment()
+        elif "POLY_TALLY_TOKEN" in os.environ:
             认证 = base64.b64encode(f"x-access-token:{os.environ['POLY_TALLY_TOKEN']}".encode()).decode()
             self.环境.update({"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "http.https://github.com/.extraheader", "GIT_CONFIG_VALUE_0": f"AUTHORIZATION: basic {认证}"})
         if not arg_路径.exists():
             arg_路径.parent.mkdir(parents=True, exist_ok=True)
-            subprocess.run(["git", "init", "--bare", str(arg_路径)], check=True, capture_output=True)
+            subprocess.run(["git", "init", "--bare", str(arg_路径)], check=True, capture_output=True, env=self.环境)
 
     def api_命令(self, *arg_参数: str) -> bytes:
         运行 = subprocess.run(["git", "--git-dir", str(self.路径), *arg_参数], env=self.环境, capture_output=True, timeout=300)
@@ -33,8 +37,14 @@ class Git对象_类:
         return 运行.stdout
 
     def api_更新(self, arg_源: str, arg_分支: str) -> str:
+        if gateway_config() is not None:
+            # Inspect names only, never credential values. A cache must not add
+            # URL rewrites, HTTP authorization, helpers, or included configs.
+            guard = subprocess.run(["git", "--git-dir", str(self.路径), "config", "--local", "--name-only", "--get-regexp", r"^(url\.|http\.|credential\.|include\.|includeif\.)"], env=self.环境, capture_output=True, timeout=30)
+            if guard.returncode not in (0, 1) or guard.stdout:
+                raise RuntimeError("Gateway cache has unsupported network configuration; use a clean trusted cache")
         self.api_命令("check-ref-format", f"refs/heads/{arg_分支}")
-        self.api_命令("fetch", "--no-tags", "--no-write-fetch-head", "--force", "--", arg_源, f"+refs/heads/{arg_分支}:refs/poly-tally/default")
+        self.api_命令("fetch", "--no-tags", "--no-write-fetch-head", "--force", "--", git_url(arg_源), f"+refs/heads/{arg_分支}:refs/poly-tally/default")
         if self.api_命令("rev-parse", "--is-shallow-repository").strip() != b"false":
             raise RuntimeError("对象缓存为浅仓库，不能声称完整历史；请恢复完整对象缓存")
         return self.api_命令("rev-parse", "refs/poly-tally/default").decode().strip()

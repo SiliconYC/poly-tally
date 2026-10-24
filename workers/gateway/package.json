@@ -1,0 +1,17 @@
+{
+  "name": "poly-tally-gateway",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "build": "node ../../scripts/check-gateway-policy.mjs && wrangler deploy --dry-run --outdir dist",
+    "dev": "wrangler dev --local"
+  },
+  "dependencies": {
+    "@noble/hashes": "2.4.0"
+  },
+  "devDependencies": {
+    "miniflare": "5.20261019.2-beta",
+    "wrangler": "4.152.0"
+  }
+}
