@@ -20,6 +20,28 @@ describe("Qt-style calendar X axis", () => {
     expect(mobile.ticks.length).toBeLessThan(desktop.ticks.length);
     expect(mobile.ticks.every((time) => time >= start && time <= end)).toBe(true);
   });
+  it("on narrow screens uses natural dates instead of arbitrary window boundaries", () => {
+    const days = timeAxisTicks(
+      utc("2026-01-01T10:17:00Z"),
+      utc("2026-01-04T09:17:00Z"),
+      180,
+    );
+    expect(days.ticks).toEqual([utc("2026-01-02"), utc("2026-01-04")]);
+    const minutes = timeAxisTicks(
+      utc("2026-10-24T08:17:00Z"),
+      utc("2026-10-24T08:32:00Z"),
+      180,
+    );
+    expect(minutes.ticks).toEqual([
+      utc("2026-10-24T08:20:00Z"),
+      utc("2026-10-24T08:30:00Z"),
+    ]);
+  });
+  it("uses days rather than repeated hour labels for multi-day windows", () => {
+    const axis = timeAxisTicks(utc("2026-01-01"), utc("2026-01-04"), 650);
+    expect(axis.unit).toBe("day");
+    expect(axis.ticks).toEqual(["2026-01-01", "2026-01-02", "2026-01-03", "2026-01-04"].map(utc));
+  });
   it("uses true UTC month starts across February leap boundaries", () => {
     const axis = timeAxisTicks(utc("2024-01-15"), utc("2024-05-10"), 720);
     expect(axis.unit).toBe("month");
