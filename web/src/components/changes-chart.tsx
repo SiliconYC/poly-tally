@@ -1,4 +1,6 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
+import { categoryTickKeys, categoryTickLabel } from "@/lib/chart-x-axis";
+import { usePlotWidth } from "@/lib/use-plot-width";
 import {
   Bar,
   BarChart,
@@ -38,6 +40,8 @@ const changeLabel = (period: ChangePeriod) =>
 export function ChangesChart({ repositories, language, since, until }: Props) {
   const [metric, setMetric] = useState<Metric>("code");
   const [period, setPeriod] = useState<"day" | "week" | "month">("month");
+  const chartHost = useRef<HTMLDivElement>(null);
+  const chartWidth = usePlotWidth(chartHost);
   const periods = useMemo(
     () =>
       periodChanges(repositories, {
@@ -55,6 +59,14 @@ export function ChangesChart({ repositories, language, since, until }: Props) {
     () => niceAxis(periods.map((item) => item.change)),
     [periods],
   );
+  const categoryAxis = useMemo(() => {
+    const keys = periods.map((item) => item.key);
+    const crossYear = Boolean(keys.length && keys[0].slice(0, 4) !== keys[keys.length - 1].slice(0, 4));
+    return {
+      crossYear,
+      ticks: categoryTickKeys(keys, Math.max(80, chartWidth - 84), period === "month" || crossYear ? 82 : 72),
+    };
+  }, [periods, period, chartWidth]);
   const config = useMemo(
     () => ({ change: { label: METRIC_LABELS[metric], color: "#0d9488" } }),
     [metric],
@@ -103,94 +115,99 @@ export function ChangesChart({ repositories, language, since, until }: Props) {
       </CardHeader>
       <CardContent className="p-5">
         {periods.length ? (
-          <ChartContainer
-            config={config}
-            className="h-[280px] w-full aspect-auto"
-          >
-            <BarChart
-              data={periods}
-              margin={{ left: 0, right: 12, top: 16, bottom: 4 }}
-              accessibilityLayer
+          <div ref={chartHost} className="min-w-0 w-full">
+            <ChartContainer
+              config={config}
+              className="h-[280px] w-full aspect-auto"
             >
-              <CartesianGrid vertical={false} strokeDasharray="3 3" />
-              <XAxis
-                dataKey="key"
-                axisLine={false}
-                tickLine={false}
-                minTickGap={36}
-                tickMargin={10}
-                tickFormatter={(value) =>
-                  period === "month" ? String(value) : String(value).slice(5)
-                }
-              />
-              <YAxis
-                width={60}
-                axisLine={false}
-                tickLine={false}
-                tickMargin={8}
-                interval={0}
-                allowDataOverflow
-                tickFormatter={(value) => axisTickLabel(Number(value), axis.ticks)}
-                domain={axis.domain}
-                ticks={axis.ticks}
-              />
-              <ReferenceLine y={0} stroke="var(--muted-foreground)" strokeOpacity={0.6} strokeWidth={1.4} />
-              <ChartTooltip
-                filterNull={false}
-                // Pin the panel vertically like the Qt chart; avoid a jittery
-                // tooltip chasing every mouse movement up and down.
-                position={{ y: 12 }}
-                wrapperStyle={{ pointerEvents: "none" }}
-                cursor={{ fill: "var(--muted)", opacity: 0.16 }}
-                content={({ active, label }) => {
-                  if (!active) return null;
-                  const item = periods.find(
-                    (item) => item.key === String(label),
-                  );
-                  if (!item) return null;
-                  const note = [
-                    item.partial ? "部分周期" : "",
-                    item.missing && item.compared
-                      ? `部分仓库（${item.compared}/${item.compared + item.missing}）`
-                      : "",
-                  ]
-                    .filter(Boolean)
-                    .join(" · ");
-                  return (
-                    <div className="min-w-40 max-w-[min(260px,calc(100vw-24px))] rounded-xl border border-border/70 bg-popover/95 px-3.5 py-3 text-xs text-popover-foreground shadow-lg backdrop-blur-sm">
-                      <p className="font-medium text-muted-foreground">{item.label}</p>
-                      <p className="mt-2 text-sm font-semibold tabular-nums">
-                        {changeLabel(item)}
-                        {item.change === null
-                          ? ""
-                          : ` ${METRIC_LABELS[metric]}`}
-                      </p>
-                      {note && (
-                        <p className="mt-2 border-t border-border/60 pt-2 text-muted-foreground">{note}</p>
-                      )}
-                    </div>
-                  );
-                }}
-              />
-              <Bar
-                dataKey="change"
-                maxBarSize={32}
-                radius={2}
-                isAnimationActive={false}
+              <BarChart
+                data={periods}
+                margin={{ left: 0, right: 12, top: 16, bottom: 4 }}
+                accessibilityLayer
               >
-                {periods.map((item) => (
-                  <Cell
-                    key={item.key}
-                    fill={
-                      item.change !== null && item.change < 0
-                        ? "#cb8063"
-                        : "#0d9488"
-                    }
-                  />
-                ))}
-              </Bar>
-            </BarChart>
-          </ChartContainer>
+                <CartesianGrid vertical={false} strokeDasharray="3 3" />
+                <XAxis
+                  dataKey="key"
+                  axisLine={false}
+                  tickLine={{ stroke: "var(--border)", strokeWidth: 1 }}
+                  tickSize={4}
+                  interval={0}
+                  ticks={categoryAxis.ticks}
+                  tick={{ fontSize: 11, fontWeight: 500 }}
+                  tickMargin={10}
+                  tickFormatter={(value) =>
+                    categoryTickLabel(String(value), period === "month", categoryAxis.crossYear)
+                  }
+                />
+                <YAxis
+                  width={60}
+                  axisLine={false}
+                  tickLine={false}
+                  tickMargin={8}
+                  interval={0}
+                  allowDataOverflow
+                  tickFormatter={(value) => axisTickLabel(Number(value), axis.ticks)}
+                  domain={axis.domain}
+                  ticks={axis.ticks}
+                />
+                <ReferenceLine y={0} stroke="var(--muted-foreground)" strokeOpacity={0.6} strokeWidth={1.4} />
+                <ChartTooltip
+                  filterNull={false}
+                  // Pin the panel vertically like the Qt chart; avoid a jittery
+                  // tooltip chasing every mouse movement up and down.
+                  position={{ y: 12 }}
+                  wrapperStyle={{ pointerEvents: "none" }}
+                  cursor={{ fill: "var(--muted)", opacity: 0.16 }}
+                  content={({ active, label }) => {
+                    if (!active) return null;
+                    const item = periods.find(
+                      (item) => item.key === String(label),
+                    );
+                    if (!item) return null;
+                    const note = [
+                      item.partial ? "部分周期" : "",
+                      item.missing && item.compared
+                        ? `部分仓库（${item.compared}/${item.compared + item.missing}）`
+                        : "",
+                    ]
+                      .filter(Boolean)
+                      .join(" · ");
+                    return (
+                      <div className="min-w-40 max-w-[min(260px,calc(100vw-24px))] rounded-xl border border-border/70 bg-popover/95 px-3.5 py-3 text-xs text-popover-foreground shadow-lg backdrop-blur-sm">
+                        <p className="font-medium text-muted-foreground">{item.label}</p>
+                        <p className="mt-2 text-sm font-semibold tabular-nums">
+                          {changeLabel(item)}
+                          {item.change === null
+                            ? ""
+                            : ` ${METRIC_LABELS[metric]}`}
+                        </p>
+                        {note && (
+                          <p className="mt-2 border-t border-border/60 pt-2 text-muted-foreground">{note}</p>
+                        )}
+                      </div>
+                    );
+                  }}
+                />
+                <Bar
+                  dataKey="change"
+                  maxBarSize={32}
+                  radius={2}
+                  isAnimationActive={false}
+                >
+                  {periods.map((item) => (
+                    <Cell
+                      key={item.key}
+                      fill={
+                        item.change !== null && item.change < 0
+                          ? "#cb8063"
+                          : "#0d9488"
+                      }
+                    />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ChartContainer>
+          </div>
         ) : (
           <div className="flex min-h-64 items-center justify-center text-sm text-muted-foreground">
             暂无历史数据
