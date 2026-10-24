@@ -1,3 +1,4 @@
+import {gatewayConfig} from './gateway-client.mjs';
 import {createHash} from 'node:crypto';
 import {execFileSync} from 'node:child_process';
 import {appendFile, mkdir, readFile, writeFile, rm} from 'node:fs/promises';
@@ -43,6 +44,8 @@ function localCredential(repository, env) {
 }
 
 export async function runState(command, filename, privateFilename, {env = process.env, fetcher = fetch, logger = console, gitCredential = false, credentialReader = localCredential} = {}) {
+  const gateway=gatewayConfig(env);
+  if(gateway&&(command!=='restore'||gitCredential))throw new Error('Gateway writes require the validated snapshot publisher; credential helper is forbidden');
   const epoch = env.POLY_TALLY_DATASET_EPOCH;
   const externalSha = command === 'restore' ? env.POLY_TALLY_EXTERNAL_PRIVATE_BLOB_SHA : undefined;
   if (epoch && !/^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/.test(epoch)) throw new Error('Invalid dataset epoch');

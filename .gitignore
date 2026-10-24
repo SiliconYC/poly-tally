@@ -37,3 +37,10 @@ state/
 site/
 playwright-report/
 test-results/
+
+# Cloudflare local artifacts and owner-only local secrets
+.wrangler/
+.dev.vars
+.dev.vars.*
+workers/gateway/dist/
+workers/gateway/.local/

@@ -99,7 +99,7 @@ test('manual workflow only builds selected sanitized snapshots, sharing a queued
   const manual=await readFile(join(root,'.github/workflows/publish-snapshot.yml'),'utf8'), pages=await readFile(join(root,'.github/workflows/pages.yml'),'utf8');
   assert.match(manual,/workflow_dispatch:/);assert.doesNotMatch(manual,/^  (push|schedule|pull_request):/m);
   for(const text of [manual,pages]) {assert.match(text,/group: poly-tally-publish/);assert.match(text,/cancel-in-progress: false/);assert.match(text,/queue: max/);}
-  assert.match(pages,/cron: '0 7,15,23 \* \* \*'/);
+  assert.doesNotMatch(pages,/^  schedule:|cron:/m); // Owner paused automatic collection; do not restore it here.
   assert.doesNotMatch(manual,/poly_tally collect|actions\/cache|state\.mjs|upload-artifact|persist:|setup-python|secrets\./);
   assert.match(manual,/runs-on: ubuntu-latest/);assert.match(manual,/POLY_TALLY_REQUIRE_PRIVATE: 'true'/);assert.match(manual,/POLY_TALLY_EXTERNAL_PRIVATE_BLOB_SHA:/);
   assert.match(manual,/retention-days: 1/);assert.match(manual,/node scripts\/build-site.mjs/);assert.match(manual,/actions\/upload-pages-artifact@v4/);assert.match(manual,/actions\/deploy-pages@v4/);

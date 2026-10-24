@@ -4,6 +4,8 @@ from urllib.parse import quote, urlsplit
 
 import requests
 
+from poly_tally.gateway import gateway_config, api_url
+
 
 # ◕ 功能
 class GitHub发现器_类:
@@ -21,9 +23,15 @@ class GitHub发现器_类:
             "X-GitHub-Api-Version": "2022-11-28",
             "User-Agent": "poly-tally/0.1",
         })
-        self.已认证 = bool(arg_令牌)
+        self.网关 = gateway_config()
+        if self.网关 and arg_令牌:
+            raise ValueError("Gateway mode cannot accept a GitHub token")
+        self.已认证 = bool(arg_令牌) or self.网关 is not None
         self.仅公开 = arg_仅公开
-        if arg_令牌:
+        if self.网关:
+            self.会话.trust_env = False
+            self.会话.headers["Authorization"] = f"Bearer {self.网关[1]}"
+        elif arg_令牌:
             self.会话.headers["Authorization"] = f"Bearer {arg_令牌}"
 
     def api_发现(self, arg_账号列表: list[str]) -> list[dict]:
@@ -114,18 +122,21 @@ class GitHub发现器_类:
         return 结果
 
     def _请求(self, arg_地址: str) -> requests.Response:
-        分解地址 = urlsplit(arg_地址)
-        if 分解地址.scheme != "https" or 分解地址.netloc != "api.github.com":
+        地址 = api_url(arg_地址) if self.网关 else arg_地址
+        分解地址 = urlsplit(地址)
+        if not self.网关 and (分解地址.scheme != "https" or 分解地址.netloc != "api.github.com"):
             raise ValueError("GitHub API 分页链接必须保持在 api.github.com")
         for 次数 in range(4):
             try:
-                响应 = self.会话.get(arg_地址, timeout=(10, 30))
+                响应 = self.会话.get(地址, timeout=(10, 30), allow_redirects=False)
             except (requests.ConnectionError, requests.Timeout):
                 if 次数 == 3:
                     raise
                 time.sleep(2 ** 次数)
                 continue
             状态 = 响应.status_code
+            if 300 <= 状态 < 400:
+                raise requests.HTTPError("GitHub redirect rejected", response=响应)
             限流 = 状态 == 429 or (
                 状态 == 403 and (
                     响应.headers.get("X-RateLimit-Remaining") == "0"

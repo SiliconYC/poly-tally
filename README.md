@@ -221,3 +221,14 @@ npm run preview -- --port 4187
 浏览器测试入口为 `npm run test:e2e`，性能测量入口为 `npm run bench`；运行前按对应测试配置准备浏览器和数据，实际结果以当次输出为准。真实数据测试仍在 `/tmp/` 临时工作目录进行，不提交实际统计。
 
 实现边界与数据协议见 [数据与模块](docs/architecture.md)。两个 Qt 参考项目的功能分析、React 迁移取舍和新版图表操作见 [仪表盘升级说明](docs/dashboard-upgrade.md)。
+
+### Cloudflare 免费密钥代理（单文件，生产验收待完成）
+
+[完整 Worker 源码：poly-tally-gateway-worker.js](poly-tally-gateway-worker.js) 可在 Cloudflare 控制台直接整份复制并 Deploy；
+沿用 `GITHUB_READ_TOKEN`、`GITHUB_PUBLISH_TOKEN`、`GATEWAY_KEY` 三项 Secrets，无额外 bootstrap 文件、构建命令或第四枚密钥。
+Dot 的显式 gateway 入口保持本地 Python / 原生 Git 统计，PAT 只留在 Cloudflare，Dot 仅使用独立代理口令。
+通用 GitHub 写接口已关闭，发布只接受验证的固定快照与非强制 tally-state 更新。
+
+**当前线上仍是用户先前部署的版本；本轮不代部署、不真实私采或发布。**
+本地功能测试不是 Cloudflare 免费 CPU 验收；首次大基线验证已有预算风险，正式运行须另确认并先通过真实 Free gate。
+不会恢复旧定时。完整边界、最简部署、失败恢复、缓存及测试见 [操作说明](docs/operations/cloudflare-gateway.md)。

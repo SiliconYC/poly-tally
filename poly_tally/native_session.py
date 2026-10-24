@@ -19,6 +19,7 @@ from poly_tally.git import Git对象_类, 缓存对象_类
 from poly_tally.lock import 运行锁_类
 from poly_tally.export import 公开导出_类
 from poly_tally.private_metrics import 私有规模导出_类
+from poly_tally.gateway import gateway_config
 
 
 def safe_environment():
@@ -150,7 +151,8 @@ class WrappedObjects:
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--config', type=Path, default=Path('config.json'))
-    parser.add_argument('--inventory', type=Path, required=True)
+    parser.add_argument('--inventory', type=Path)
+    parser.add_argument('--gateway', action='store_true', help='Require the token-free gateway; never fall back to a credential helper')
     parser.add_argument('--state', type=Path, required=True)
     parser.add_argument('--cache', type=Path, required=True)
     parser.add_argument('--wrapper', type=Path)
@@ -160,17 +162,25 @@ def main():
     parser.add_argument('--export-dir', type=Path, help='Sanitized local outputs, only after a complete unified collection')
     args = parser.parse_args()
     safe_environment()
+    if args.gateway:
+        if gateway_config() is None:
+            parser.error('--gateway requires URL and proxy password')
+        if args.inventory or args.wrapper:
+            parser.error('--gateway performs fresh gateway discovery; inventory/wrapper cannot be mixed')
+    elif args.inventory is None:
+        parser.error('--inventory is required without --gateway')
     if args.export_dir and args.public_only:
         parser.error('--export-dir requires unified public and private collection')
     if args.export_dir and args.export_dir.exists() and any(args.export_dir.iterdir()):
         parser.error('--export-dir must be a fresh empty batch directory; do not reuse old publication inputs')
     os.umask(0o077)
     config = json.loads(args.config.read_text())
-    discovery = NativeDiscovery(json.loads(args.inventory.read_text()), args.wrapper, args.public_only)
+    discovery = None if args.gateway else NativeDiscovery(json.loads(args.inventory.read_text()), args.wrapper, args.public_only)
     with 运行锁_类(args.cache / '.native.lock'), 运行锁_类(args.state / '.native.lock'):
         collector = 采集器_类(config, args.state, None, args.public_only, arg_数据批次=config['datasetEpoch'], arg_缓存目录=args.cache)
-        collector.发现器 = discovery
-        collector.引擎.对象工厂 = discovery.object_factory
+        if discovery is not None:
+            collector.发现器 = discovery
+            collector.引擎.对象工厂 = discovery.object_factory
         try:
             if args.restore_public_checkpoint:
                 collector.api_恢复检查点(args.restore_public_checkpoint)
